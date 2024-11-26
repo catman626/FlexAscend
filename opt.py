@@ -28,7 +28,7 @@ config = Config()
 
 
 class Attention(nn.Cell):
-    def __init__(self, namePrefix:str, config: Config):
+    def __init__(self, config: Config):
         super().__init__()
 
         self.headDim = headDim = config.hiddenSize // config.numHeads
@@ -87,24 +87,22 @@ class Attention(nn.Cell):
         return attnOut
 
 class FeedForward(nn.Cell):
-    def __init__(self, namePrefix:str, config:Config):
+    def __init__(self, config:Config):
         super().__init__()
         hiddenSize = config.hiddenSize
         ffnHiddenSize = config.ffnHiddenSize
         
         self.layerNorm = nn.LayerNorm(normalized_shape=(hiddenSize, ))
         self.linear1 = nn.Dense(hiddenSize, ffnHiddenSize)
-        self.relu1 = nn.ReLU()
+        self.relu = nn.ReLU()
         self.linear2 = nn.Dense(ffnHiddenSize, hiddenSize)
-        self.relu2 = nn.ReLU()
         self.residual = ops.Add()
 
     def construct(self, x):
         o = self.layerNorm(x)
         o = self.linear1(o)
-        o = self.relu1(o)
+        o = self.relu(o)
         o = self.linear2(o)
-        o = self.relu2(o)
         
         ffnOut = self.residual(o, x)
         return ffnOut
@@ -112,10 +110,10 @@ class FeedForward(nn.Cell):
 
 class TransformerLayer(nn.Cell):
     
-    def __init__(self, namePrefix,  config:Config):
+    def __init__(self, config:Config):
         super().__init__()
-        self.attn = Attention(namePrefix=namePrefix, config=config)
-        self.ffn = FeedForward(namePrefix=namePrefix, config=config)
+        self.attn = Attention(config=config)
+        self.ffn = FeedForward(config=config)
 
     def construct(self, x):
         attnOut = self.attn(x)
@@ -187,7 +185,7 @@ class OPT(nn.Cell):
         self.inputEmbed = OPTInputEmbed(config)
         for i in range(config.numHiddenLayer):
             layers.append(
-                TransformerLayer(namePrefix = f"layer.{i}", config = config)
+                TransformerLayer(config = config)
             )
         self.outputEmbed = OPTOutputEmbed(config)  
         
