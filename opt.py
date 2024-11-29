@@ -130,9 +130,6 @@ class Layer(nn.Cell):
         pass
 
 
-
-
-
 def lazyParameter(shape, name):
     return Parameter(
             initializer(init="normal", shape = shape),
@@ -158,7 +155,7 @@ class OPTInputEmbed(Layer):
 class OPTOutputEmbed(Layer):
     def __init__(self, config:Config):
         super().__init__()
-        self.tokenWeight = lazyParameter(shape=(config.hiddenSize, config.vocabSize), name="embed_tokens.weight.ref")
+        self.tokenWeight = lazyParameter(shape=(config.vocabSize, config.hiddenSize), name="embed_tokens.weight.ref")
         self.norm = nn.LayerNorm(normalized_shape=(config.hiddenSize, ), 
                                  gamma_init=lazyParameter(shape=(config.hiddenSize, ), name="output_embed_layer_norm.weight"),
                                  beta_init=lazyParameter(shape=(config.hiddenSize), name="output_embed_layer_norm.bias")
