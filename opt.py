@@ -8,7 +8,7 @@ import math
 from transformers import AutoTokenizer
 
 import argparse
-import tqdm
+from tqdm import tqdm
 
 class Config:
     def __init__(self):
@@ -23,6 +23,7 @@ class Config:
         self.numHiddenLayer = 24
         self.vocabSize = 50272
         self.weightFname = None
+        self.localTokenizer = "opt-1.3b"
 
 config = Config()
 
@@ -178,8 +179,7 @@ class OPT(nn.Cell):
         super().__init__()
         self.numLayers = config.numHiddenLayer
         
-        
-        self.tokenizer = AutoTokenizer.from_pretrained("facebook/opt-30b")
+        self.tokenizer = AutoTokenizer.from_pretrained("/home/ma-user/work/FlexAscend/opt-1.3b") 
         
         layers = nn.SequentialCell()
         self.inputEmbed = OPTInputEmbed(config)
@@ -201,7 +201,7 @@ class OPT(nn.Cell):
         weights = load_checkpoint(weightFname)
         
         uninitializedInNet = []
-        unusedWeight = weights.keys()
+        unusedWeight = set(weights.keys())
         for name, param in tqdm(self.parameters_and_names()):
             if name not in weights.keys():
                 uninitializedInNet.append(name)
@@ -212,12 +212,12 @@ class OPT(nn.Cell):
 
         print("load weight finish")
         if uninitializedInNet:
-            print("unused weight: ")
+            print(">>> uninitialized weight: ")
             for name in uninitializedInNet:
                 print(name)
 
         if unusedWeight:
-            print("unused weight:") 
+            print(">>> unused weight:") 
             for name in unusedWeight:
                 print(name)
             
@@ -225,7 +225,7 @@ class OPT(nn.Cell):
 
        
 parser = argparse.ArgumentParser() 
-parser.add_argument("--ckpt", required=True, type=str)
+parser.add_argument("--ckpt", type=str, default="model-weight/mindspore-weight.ckpt")
 args = parser.parse_args()
 
 config.weightFname = args.ckpt
