@@ -214,12 +214,12 @@ class OPT(nn.Cell):
 
         print("load weight finish")
         if uninitializedInNet:
-            print("unused weight: ")
+            print(">>> uninitialized weight: ")
             for name in uninitializedInNet:
                 print(name)
 
         if unusedWeight:
-            print("unused weight:") 
+            print(">>> unused weight:") 
             for name in unusedWeight:
                 print(name)
             
