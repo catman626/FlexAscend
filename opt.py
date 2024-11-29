@@ -217,8 +217,24 @@ class OPT(nn.Cell):
             print(">>> unused weight:") 
             for name in unusedWeight:
                 print(name)
-            
 
+    def runIter(self, i, x):
+        for l in self.layers:
+            x = l(x) 
+
+        
+        
+            
+    def run(self, inputSentences: list[str]):
+        inputTokens = self.tokenizer(inputSentences)
+        sequence = inputTokens
+        
+        for i in range(self.maxLength):
+            for l in self.layers:
+                
+            
+            
+         
 
        
 parser = argparse.ArgumentParser() 
@@ -228,3 +244,4 @@ args = parser.parse_args()
 config.weightFname = args.ckpt
 
 model = OPT(config)
+
