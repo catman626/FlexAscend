@@ -50,21 +50,36 @@ class Attention(nn.Cell):
         self.batchMatMulSV = ops.BatchMatMul()
         
         self.residual = ops.Add()
-
+    
+        self.kCache = Tensor(shape=(config.batchSize, config.seqLength, config.hiddenSize))
+        self.vCache = Tensor(shape=(config.batchSize, config.seqLength, config.hiddenSize))
         
-    def construct(self, x, attentionMask):
-        b, s, h = x.shape
-        normalX = self.attnLayerNorm(x)
+    def constrcut(self, x, attentionMask, iterNo):
+        """ all in form (b, s, h)  """
+        b, s, h = q.shape
 
+        normalX = self.attnLayerNorm(x)
+        # (b, s, h)
         q, k, v = self.qProj(normalX), self.kProj(normalX), self.vProj(normalX)
 
+        if iterNo == 0:
+            self.kCache[:, :s] = k
+            self.vCache[:, :s] = v
+            
+        else :
+            self.kCache[:, s] = k
+            self.vCache[:, s] = v
+            k = self.kCache[:, :s]
+            v = self.vCache[:, :s]
+
+        # (b, s, nh, h1)
         q = q.view(b, s, self.numHeads, self.headDim)
         k = k.view(b, s, self.numHeads, self.headDim)
         v = v.view(b, s, self.numHeads, self.headDim)
+
         q = ops.permute(q, (0, 2, 1, 3))
         k = ops.permute(k, (0, 2, 3, 1))
         v = ops.permute(v, (0, 2, 1, 3))
-
         # output shape (b, nh, s, s)
         score = self.batchMatMul(q, k)
 
@@ -86,6 +101,7 @@ class Attention(nn.Cell):
         attnOut = self.residual(attnOut, x)
 
         return attnOut
+        
 
 class FeedForward(nn.Cell):
     def __init__(self, config:Config):
@@ -154,7 +170,6 @@ class OPTInputEmbed(Layer):
 
 class OPTOutputEmbed(Layer):
     def __init__(self, config:Config):
-        super().__init__()
         self.tokenWeight = lazyParameter(shape=(config.vocabSize, config.hiddenSize), name="embed_tokens.weight.ref")
         self.norm = nn.LayerNorm(normalized_shape=(config.hiddenSize, ), 
                                  gamma_init=lazyParameter(shape=(config.hiddenSize, ), name="output_embed_layer_norm.weight"),
@@ -218,20 +233,23 @@ class OPT(nn.Cell):
             for name in unusedWeight:
                 print(name)
 
-    def runIter(self, i, x):
+    def runIter(self, i):
         for l in self.layers:
             x = l(x) 
 
-        
+        return x
         
             
     def run(self, inputSentences: list[str]):
         inputTokens = self.tokenizer(inputSentences)
-        sequence = inputTokens
         
-        for i in range(self.maxLength):
-            for l in self.layers:
-                
+        outputIDs = model(inputTokens)
+
+        outputTokens = self.tokenizer.convert_ids_to_tokens(outputIDs)
+        outputSentences = self.tokenizer.convert_tokens_to_string(outputSentences)
+
+        return outputSentences
+        
             
             
          
@@ -245,3 +263,9 @@ config.weightFname = args.ckpt
 
 model = OPT(config)
 
+inputs = [
+    "hello world!",
+    "the largest cat in the world is "
+]
+
+model.run(inputs)
