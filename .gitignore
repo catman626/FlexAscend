@@ -1,3 +1,4 @@
 checkpoint_download
-model-weight
+model/weight
 checkpoint
+

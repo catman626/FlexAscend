@@ -1,11 +1,11 @@
-import abc
-import numpy as np
+from transformers import AutoTokenizer
 from mindspore import nn, ops, dtype, Parameter, common, Tensor
 from mindspore.common.initializer import initializer
 from mindspore import load_checkpoint
 import math
+import abc
+import numpy as np
 
-from transformers import AutoTokenizer
 
 import argparse
 from tqdm import tqdm
@@ -33,6 +33,7 @@ class Attention(nn.Cell):
         super().__init__()
 
         self.headDim = headDim = config.hiddenSize // config.numHeads
+        self.seqLength = config.seqLength
         hiddenSize = config.hiddenSize
         self.normFactor = math.sqrt(self.headDim)
         self.numHeads = config.numHeads
@@ -51,18 +52,18 @@ class Attention(nn.Cell):
         
         self.residual = ops.Add()
     
-        self.kCache = Tensor(shape=(config.batchSize, config.seqLength, config.hiddenSize))
-        self.vCache = Tensor(shape=(config.batchSize, config.seqLength, config.hiddenSize))
         
-    def constrcut(self, x, attentionMask, iterNo):
+    def construct(self, x, iterNo, attentionMask=None):
         """ all in form (b, s, h)  """
-        b, s, h = q.shape
+        b, s, h = x.shape
 
         normalX = self.attnLayerNorm(x)
         # (b, s, h)
         q, k, v = self.qProj(normalX), self.kProj(normalX), self.vProj(normalX)
 
         if iterNo == 0:
+            self.kCache = Tensor(np.zeros((b, self.seqLength, h)))
+            self.vCache = Tensor(np.zeros((b, self.seqLength, h)))
             self.kCache[:, :s] = k
             self.vCache[:, :s] = v
             
@@ -85,7 +86,10 @@ class Attention(nn.Cell):
 
         ids = ops.arange(end=s)
         casualMask = ids <= ids.view(s, 1)
-        mask = casualMask.view(1, 1, s, s) & attentionMask.view(b, 1, s, s)
+        if attentionMask is not None:
+            mask = casualMask.view(1, 1, s, s) & attentionMask.view(b, 1, s, s)
+        else :
+            mask = casualMask.view(1, 1, s, s) 
         
         score = ops.where(mask, score, -1e4)
         score = self.softmax(score)
@@ -133,7 +137,7 @@ class TransformerLayer(nn.Cell):
         self.ffn = FeedForward(config=config)
 
     def construct(self, x):
-        attnOut = self.attn(x)
+        attnOut = self.attn(x, iterNo=0)
         
         ffnOut = self.ffn(attnOut) 
 
@@ -161,8 +165,8 @@ class OPTInputEmbed(Layer):
         self.add = ops.Add()
 
     def construct(self, inputIDs):
-        tokenEmbed = self.gather(self.tokenEmbedWeight, inputIDs)
-        posEmbed = self.gather(self.posEmbedWeight, inputIDs)
+        tokenEmbed = self.gather(self.tokenEmbedWeight, inputIDs, 0)
+        posEmbed = self.gather(self.posEmbedWeight, inputIDs, 0)
         embed = self.add(tokenEmbed, posEmbed)
         return embed
         
@@ -170,6 +174,7 @@ class OPTInputEmbed(Layer):
 
 class OPTOutputEmbed(Layer):
     def __init__(self, config:Config):
+        super().__init__()
         self.tokenWeight = lazyParameter(shape=(config.vocabSize, config.hiddenSize), name="embed_tokens.weight.ref")
         self.norm = nn.LayerNorm(normalized_shape=(config.hiddenSize, ), 
                                  gamma_init=lazyParameter(shape=(config.hiddenSize, ), name="output_embed_layer_norm.weight"),
@@ -191,7 +196,7 @@ class OPT(nn.Cell):
         super().__init__()
         self.numLayers = config.numHiddenLayer
         
-        self.tokenizer = AutoTokenizer.from_pretrained("/home/ma-user/work/FlexAscend/opt-1.3b") 
+        self.tokenizer = AutoTokenizer.from_pretrained("/home/ma-user/work/FlexAscend/model/opt-1.3b") 
         
         layers = nn.SequentialCell()
         self.inputEmbed = OPTInputEmbed(config)
@@ -241,12 +246,15 @@ class OPT(nn.Cell):
         
             
     def run(self, inputSentences: list[str]):
-        inputTokens = self.tokenizer(inputSentences)
+        inputTokens = self.tokenizer(inputSentences, padding="max_length",  max_length=config.seqLength).input_ids
         
-        outputIDs = model(inputTokens)
-
+        inputTokens = Tensor(inputTokens)
+        h = self.inputEmbed(inputTokens)
+        for l in self.layers:
+            h = l(h) 
+        outputIDs = self.outputEmbed(h)
         outputTokens = self.tokenizer.convert_ids_to_tokens(outputIDs)
-        outputSentences = self.tokenizer.convert_tokens_to_string(outputSentences)
+        outputSentences = self.tokenizer.convert_tokens_to_string(outputTokens)
 
         return outputSentences
         
@@ -263,9 +271,9 @@ config.weightFname = args.ckpt
 
 model = OPT(config)
 
+
 inputs = [
     "hello world!",
     "the largest cat in the world is "
 ]
-
 model.run(inputs)
