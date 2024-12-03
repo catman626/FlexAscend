@@ -98,7 +98,7 @@ class Attention(nn.Cell):
         attnOut = self.batchMatMulSV(score, v)        
         
         # (b, nh, s, h1) -> (b, s, nh, h1) -> (b, s, h)
-        attnOut = ops.permute(attnOut, (1, 2)).flatten(start_dim=2)
+        attnOut = ops.permute(attnOut, (0, 2, 1, 3)).flatten(start_dim=2)
         
         attnOut = self.outProj(attnOut)
 
@@ -248,23 +248,31 @@ class OPT(nn.Cell):
     def run(self, inputSentences: list[str]):
         inputTokens = self.tokenizer(inputSentences, padding="max_length",  max_length=config.seqLength).input_ids
         
-        inputTokens = Tensor(inputTokens)
-        h = self.inputEmbed(inputTokens)
+        tokensTensor = Tensor(inputTokens)
+        h = self.inputEmbed(tokensTensor)
         for l in self.layers:
             h = l(h) 
-        outputIDs = self.outputEmbed(h)
-        outputTokens = self.tokenizer.convert_ids_to_tokens(outputIDs)
-        outputSentences = self.tokenizer.convert_tokens_to_string(outputTokens)
+        
+        # h in shape (b, s, h) -> (b, h)
+        outputIDs = self.outputEmbed(h[:,-1])
+        print(f"outputIDs in shape: {outputIDs.shape}")
+        
+        inputTokens = self.tokenizer(inputSentences).input_ids
+        for i, line in enumerate(inputTokens):
+            line.append(outputIDs[i].tolist())
 
+        outputSentences = []
+        for line in inputTokens:
+
+            tokensLine = self.tokenizer.convert_ids_to_tokens(line)
+            sentence = self.tokenizer.convert_tokens_to_string(tokensLine)
+
+            outputSentences.append(sentence)
+    
         return outputSentences
         
-            
-            
-         
-
-       
 parser = argparse.ArgumentParser() 
-parser.add_argument("--ckpt", type=str, default="model-weight/mindspore-weight.ckpt")
+parser.add_argument("--ckpt", type=str, default="model/weight/mindspore-weight.ckpt")
 args = parser.parse_args()
 
 config.weightFname = args.ckpt
@@ -274,6 +282,9 @@ model = OPT(config)
 
 inputs = [
     "hello world!",
-    "the largest cat in the world is "
+    "the largest cat in the world is:"
 ]
-model.run(inputs)
+outputs = model.run(inputs)
+for s in outputs:
+    print(s)
+
