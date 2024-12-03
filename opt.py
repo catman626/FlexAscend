@@ -1,6 +1,6 @@
 from transformers import AutoTokenizer
 from mindspore import nn, ops, dtype, Parameter, common, Tensor
-from mindspore.common.initializer import initializer
+from mindspore.common.initializer import initializer, Zero
 from mindspore import load_checkpoint
 import math
 import abc
@@ -17,7 +17,8 @@ class Config:
         self.ffnHiddenSize = 4 * self.hiddenSize
         self.numHeads = 32
         self.hasBias = True
-        self.seqLength = 2048
+        self.maxSeqLen = 2048
+        self.inputLen = 512
         self.batchSize = 64
 
         self.numHiddenLayer = 24
@@ -33,7 +34,7 @@ class Attention(nn.Cell):
         super().__init__()
 
         self.headDim = headDim = config.hiddenSize // config.numHeads
-        self.seqLength = config.seqLength
+        self.seqLength = config.maxSeqLen
         hiddenSize = config.hiddenSize
         self.normFactor = math.sqrt(self.headDim)
         self.numHeads = config.numHeads
@@ -55,6 +56,7 @@ class Attention(nn.Cell):
         
     def construct(self, x, iterNo, attentionMask=None):
         """ all in form (b, s, h)  """
+
         b, s, h = x.shape
 
         normalX = self.attnLayerNorm(x)
@@ -81,6 +83,7 @@ class Attention(nn.Cell):
         q = ops.permute(q, (0, 2, 1, 3))
         k = ops.permute(k, (0, 2, 3, 1))
         v = ops.permute(v, (0, 2, 1, 3))
+
         # output shape (b, nh, s, s)
         score = self.batchMatMul(q, k)
 
@@ -136,19 +139,12 @@ class TransformerLayer(nn.Cell):
         self.attn = Attention(config=config)
         self.ffn = FeedForward(config=config)
 
-    def construct(self, x):
-        attnOut = self.attn(x, iterNo=0)
+    def construct(self, x, iterNo):
+        attnOut = self.attn(x, iterNo)
         
         ffnOut = self.ffn(attnOut) 
 
         return ffnOut
-        
-   
-class Layer(nn.Cell):
-    @abc.abstractmethod
-    def initialized(self):
-        pass
-
 
 def lazyParameter(shape, name):
     return Parameter(
@@ -156,11 +152,11 @@ def lazyParameter(shape, name):
             name = name
         )
 
-class OPTInputEmbed(Layer):
+class OPTInputEmbed(nn.Cell):
     def __init__(self, config:Config):
         super().__init__()
         self.tokenEmbedWeight = lazyParameter(shape=(config.vocabSize, config.hiddenSize), name="embed_tokens.weight")
-        self.posEmbedWeight = lazyParameter(shape=(config.seqLength + 2, config.hiddenSize), name="embed_positions.weight")
+        self.posEmbedWeight = lazyParameter(shape=(config.maxSeqLen + 2, config.hiddenSize), name="embed_positions.weight")
         self.gather = ops.operations.Gather()
         self.add = ops.Add()
 
@@ -200,6 +196,7 @@ class OPT(nn.Cell):
         
         layers = nn.SequentialCell()
         self.inputEmbed = OPTInputEmbed(config)
+
         for i in range(config.numHiddenLayer):
             layers.append(
                 TransformerLayer(config = config)
@@ -209,6 +206,9 @@ class OPT(nn.Cell):
         self.layers = layers
         
         self.loadWeight(config.weightFname)
+
+        self.tokensBuffer = None
+        self.maxSeqLen = config.maxSeqLen
         
 
     def loadWeight(self, weightFname):
@@ -238,38 +238,41 @@ class OPT(nn.Cell):
             for name in unusedWeight:
                 print(name)
 
-    def runIter(self, i):
-        for l in self.layers:
-            x = l(x) 
-
-        return x
-        
-            
-    def run(self, inputSentences: list[str]):
-        inputTokens = self.tokenizer(inputSentences, padding="max_length",  max_length=config.seqLength).input_ids
-        
-        tokensTensor = Tensor(inputTokens)
-        h = self.inputEmbed(tokensTensor)
+    def runIter(self, i, currLen):
+        h = self.inputEmbed(self.tokensBuffer[:, :currLen])
         for l in self.layers:
             h = l(h) 
         
-        # h in shape (b, s, h) -> (b, h)
-        outputIDs = self.outputEmbed(h[:,-1])
-        print(f"outputIDs in shape: {outputIDs.shape}")
+        # o should be in shape (b, )
+        o = self.outputEmbed(h)
+        self.tokensBuffer[:,s+i] = o
         
-        inputTokens = self.tokenizer(inputSentences).input_ids
-        for i, line in enumerate(inputTokens):
-            line.append(outputIDs[i].tolist())
+            
+    def run(self, inputSentences: list[str]):
+        inputTokens = self.tokenizer(inputSentences, padding="max_length",  max_length=config.maxSeqLen).input_ids
+    
+        tokensTensor = Tensor(inputTokens) 
+
+        b, s, h = tokensTensor.shape
+        self.tokensBuffer = Tensor(init=Zero(), dtype=dtype.float32, 
+                                   shape=(b, config.maxSeqLen))
+
+        self.tokensBuffer[:, :s] = tokensTensor
+        
+        maxIter = self.maxSeqLen - s 
+        for i in range(maxIter):
+            self.runIter(i, s+i)
 
         outputSentences = []
-        for line in inputTokens:
-
-            tokensLine = self.tokenizer.convert_ids_to_tokens(line)
-            sentence = self.tokenizer.convert_tokens_to_string(tokensLine)
+        
+        for line in self.tokensBuffer.tolist():
+            sentence = self.tokenizer.convert_ids_to_tokens(line)
+            sentence = self.tokenizer.convert_tokens_to_string(sentence)
 
             outputSentences.append(sentence)
-    
+
         return outputSentences
+
         
 parser = argparse.ArgumentParser() 
 parser.add_argument("--ckpt", type=str, default="model/weight/mindspore-weight.ckpt")
@@ -281,7 +284,7 @@ model = OPT(config)
 
 
 inputs = [
-    "hello world!",
+    "hello!",
     "the largest cat in the world is:"
 ]
 outputs = model.run(inputs)
