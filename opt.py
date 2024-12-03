@@ -64,14 +64,16 @@ class Attention(nn.Cell):
         q, k, v = self.qProj(normalX), self.kProj(normalX), self.vProj(normalX)
 
         if iterNo == 0:
+            # q,k,v in shape (b, s, h)
             self.kCache = Tensor(np.zeros((b, self.seqLength, h)))
             self.vCache = Tensor(np.zeros((b, self.seqLength, h)))
             self.kCache[:, :s] = k
             self.vCache[:, :s] = v
             
         else :
-            self.kCache[:, s] = k
-            self.vCache[:, s] = v
+            # q,k,v in shape (b, 1, h)
+            self.kCache[:, s-1:s] = k
+            self.vCache[:, s-1:s] = v
             k = self.kCache[:, :s]
             v = self.vCache[:, :s]
 
@@ -165,10 +167,14 @@ class OPTInputEmbed(nn.Cell):
         posEmbed = self.gather(self.posEmbedWeight, inputIDs, 0)
         embed = self.add(tokenEmbed, posEmbed)
         return embed
+
+    # def loadWeight(self, tokenEmbedWeight, posEmbedWeight):
+    #     self.tokenEmbedWeight.set_data(tokenEmbedWeight)
+    #     self.posEmbedWeight.set_data(shape=)
         
 
 
-class OPTOutputEmbed(Layer):
+class OPTOutputEmbed(nn.Cell):
     def __init__(self, config:Config):
         super().__init__()
         self.tokenWeight = lazyParameter(shape=(config.vocabSize, config.hiddenSize), name="embed_tokens.weight.ref")
@@ -207,14 +213,14 @@ class OPT(nn.Cell):
         
         self.loadWeight(config.weightFname)
 
-        self.tokensBuffer = None
+        self.tokensBuffer: Tensor = None
         self.maxSeqLen = config.maxSeqLen
         
 
     def loadWeight(self, weightFname):
         assert isinstance(weightFname, str)
         
-        print("load weight begin")
+        print(">>> load weight begin")
         weights = load_checkpoint(weightFname)
         
         uninitializedInNet = []
@@ -226,8 +232,7 @@ class OPT(nn.Cell):
                 param.set_data(weights[name])
                 unusedWeight.remove(name)
                 
-
-        print("load weight finish")
+        print("<<< load weight finish")
         if uninitializedInNet:
             print(">>> uninitialized weight: ")
             for name in uninitializedInNet:
@@ -239,29 +244,40 @@ class OPT(nn.Cell):
                 print(name)
 
     def runIter(self, i, currLen):
-        h = self.inputEmbed(self.tokensBuffer[:, :currLen])
+        if i == 0:  # prefill stage
+            h = self.inputEmbed(self.tokensBuffer[:, :currLen]) 
+        else :
+            # should get a input of shape (b, h) -> (b, 1, h)
+            h = self.inputEmbed(self.tokensBuffer[:, currLen-1:currLen])
+            
         for l in self.layers:
-            h = l(h) 
+            h = l(h, i) 
         
         # o should be in shape (b, )
         o = self.outputEmbed(h)
-        self.tokensBuffer[:,s+i] = o
+        self.tokensBuffer[:,currLen] = o
         
             
     def run(self, inputSentences: list[str]):
-        inputTokens = self.tokenizer(inputSentences, padding="max_length",  max_length=config.maxSeqLen).input_ids
-    
+        promptLen = max([len(l) for l in inputSentences])
+        inputTokens = self.tokenizer(inputSentences, padding="max_length",  max_length=promptLen).input_ids
         tokensTensor = Tensor(inputTokens) 
 
-        b, s, h = tokensTensor.shape
-        self.tokensBuffer = Tensor(init=Zero(), dtype=dtype.float32, 
-                                   shape=(b, config.maxSeqLen))
+        b, s = tokensTensor.shape
+        self.tokensBuffer = Tensor(init=Zero(), dtype=dtype.int32, 
+                                   shape=(b, self.maxSeqLen))
 
         self.tokensBuffer[:, :s] = tokensTensor
         
-        maxIter = self.maxSeqLen - s 
+        maxIter = 16 
+        
+        print(">>> inference begin")
         for i in range(maxIter):
+            print(f" >>> loop {i} begin")
             self.runIter(i, s+i)
+
+        print("<<< inference end")
+        
 
         outputSentences = []
         
