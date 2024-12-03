@@ -6,27 +6,29 @@ import math
 import abc
 import numpy as np
 
+from mindspore.numpy import ones
+
 
 import argparse
 from tqdm import tqdm
 
 class Config:
-    def __init__(self):
+    def __init__(self):        
         self.dtype = dtype.float16
-        self.hiddenSize = 2048
-        self.ffnHiddenSize = 4 * self.hiddenSize
-        self.numHeads = 32
         self.hasBias = True
-        self.maxSeqLen = 2048
+        self.maxSeqLen=2048
         self.inputLen = 512
         self.batchSize = 64
 
-        self.numHiddenLayer = 24
+        self.numHiddenLayer = 12
         self.vocabSize = 50272
         self.weightFname = None
         self.localTokenizer = "opt-1.3b"
+        self.numHeads=12
+        self.hiddenSize=768
+        self.ffnHiddenSize = 4 * self.hiddenSize
+        self.tokenizer = None
 
-config = Config()
 
 
 class Attention(nn.Cell):
@@ -159,12 +161,20 @@ class OPTInputEmbed(nn.Cell):
         super().__init__()
         self.tokenEmbedWeight = lazyParameter(shape=(config.vocabSize, config.hiddenSize), name="embed_tokens.weight")
         self.posEmbedWeight = lazyParameter(shape=(config.maxSeqLen + 2, config.hiddenSize), name="embed_positions.weight")
+        self.cumsum = ops.CumSum()
         self.gather = ops.operations.Gather()
         self.add = ops.Add()
 
-    def construct(self, inputIDs):
+    def construct(self, inputIDs, attentionMask:Tensor):
+        # attention mask in shape (b, s)
+
         tokenEmbed = self.gather(self.tokenEmbedWeight, inputIDs, 0)
-        posEmbed = self.gather(self.posEmbedWeight, inputIDs, 0)
+
+        # posIds in shape (b, s)
+        posIds = ops.cumsum(attentionMask, axis=1)
+        
+        posEmbed = self.gather(self.posEmbedWeight, posIds, 0)
+        
         embed = self.add(tokenEmbed, posEmbed)
         return embed
 
@@ -198,7 +208,7 @@ class OPT(nn.Cell):
         super().__init__()
         self.numLayers = config.numHiddenLayer
         
-        self.tokenizer = AutoTokenizer.from_pretrained("/home/ma-user/work/FlexAscend/model/opt-1.3b") 
+        self.tokenizer = AutoTokenizer.from_pretrained(config.tokenizer) 
         
         layers = nn.SequentialCell()
         self.inputEmbed = OPTInputEmbed(config)
@@ -215,6 +225,7 @@ class OPT(nn.Cell):
 
         self.tokensBuffer: Tensor = None
         self.maxSeqLen = config.maxSeqLen
+        self.attentionMask :Tensor = None   # true : valid, false : neglect
         
 
     def loadWeight(self, weightFname):
@@ -236,6 +247,7 @@ class OPT(nn.Cell):
         if uninitializedInNet:
             print(">>> uninitialized weight: ")
             for name in uninitializedInNet:
+                # attention mask in shape (b, s)
                 print(name)
 
         if unusedWeight:
@@ -244,11 +256,13 @@ class OPT(nn.Cell):
                 print(name)
 
     def runIter(self, i, currLen):
+        bs = self.tokensBuffer.shape[0]
+        attentionMask = ops.ones(shape=(bs, currLen), dtype=dtype.int32)
         if i == 0:  # prefill stage
-            h = self.inputEmbed(self.tokensBuffer[:, :currLen]) 
+            h = self.inputEmbed(self.tokensBuffer[:, :currLen], attentionMask)
         else :
             # should get a input of shape (b, h) -> (b, 1, h)
-            h = self.inputEmbed(self.tokensBuffer[:, currLen-1:currLen])
+            h = self.inputEmbed(self.tokensBuffer[:, currLen-1:currLen], attentionMask)
             
         for l in self.layers:
             h = l(h, i) 
@@ -256,7 +270,8 @@ class OPT(nn.Cell):
         # o should be in shape (b, )
         o = self.outputEmbed(h)
         self.tokensBuffer[:,currLen] = o
-        
+
+                
             
     def run(self, inputSentences: list[str]):
         promptLen = max([len(l) for l in inputSentences])
@@ -273,12 +288,10 @@ class OPT(nn.Cell):
         
         print(">>> inference begin")
         for i in range(maxIter):
-            print(f" >>> loop {i} begin")
+            print(f"    >>> loop {i} begin")
             self.runIter(i, s+i)
 
         print("<<< inference end")
-        
-
         outputSentences = []
         
         for line in self.tokensBuffer.tolist():
@@ -289,21 +302,27 @@ class OPT(nn.Cell):
 
         return outputSentences
 
-        
-parser = argparse.ArgumentParser() 
-parser.add_argument("--ckpt", type=str, default="model/weight/mindspore-weight.ckpt")
-args = parser.parse_args()
+import argparse
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--ckpt", type=str, required=True)
+    parser.add_argument("--tokenizer", type=str, default="/home/ma-user/work/FlexAscend/model/opt-1.3b")
 
-config.weightFname = args.ckpt
-
-model = OPT(config)
+    args = parser.parse_args()
 
 
-inputs = [
-    "hello!",
-    "the largest cat in the world is:"
-]
-outputs = model.run(inputs)
-for s in outputs:
-    print(s)
+    config = Config()
+    config.weightFname = args.ckpt
+    config.tokenizer = args.tokenizer
+
+    model = OPT(config)
+
+    inputs = [
+        "hello!",
+        "the largest cat in the world is:"
+    ]
+
+    outputs = model.run(inputs)
+    for s in outputs:
+        print(s)
 
