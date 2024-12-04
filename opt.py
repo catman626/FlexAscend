@@ -261,12 +261,14 @@ class OPT(nn.Cell):
     def runIter(self, i, currLen):
         bs = self.tokensBuffer.shape[0]
         attentionMask = ops.ones(shape=(bs, currLen), dtype=dtype.int32)
+
         if i == 0:  # prefill stage
-            h = self.inputEmbed(self.tokensBuffer[:, :currLen], attentionMask)
+            inputEmbed = self.tokensBuffer[:, :currLen]
         else :
             # should get a input of shape (b, h) -> (b, 1, h)
-            h = self.inputEmbed(self.tokensBuffer[:, currLen-1:currLen], attentionMask)
-            
+            inputEmbed = self.tokensBuffer[:, currLen-1:currLen]
+        h = self.inputEmbed(inputEmbed, attentionMask)
+
         for l in self.layers:
             h = l(h, i) 
         
