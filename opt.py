@@ -255,6 +255,9 @@ class OPT(nn.Cell):
             for name in unusedWeight:
                 print(name)
 
+        if uninitializedInNet:
+            exit(1)
+
     def runIter(self, i, currLen):
         bs = self.tokensBuffer.shape[0]
         attentionMask = ops.ones(shape=(bs, currLen), dtype=dtype.int32)
