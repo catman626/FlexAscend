@@ -67,18 +67,17 @@ class Attention(nn.Cell):
 
         if iterNo == 0:
             # q,k,v in shape (b, s, h)
-            self.kCache = Tensor(np.zeros((b, self.seqLength, h)))
-            self.vCache = Tensor(np.zeros((b, self.seqLength, h)))
-            self.kCache[:, :s] = k
-            self.vCache[:, :s] = v
+            self.kCache = k
+            self.vCache = v
             
         else :
             # q,k,v in shape (b, 1, h)
-            self.kCache[:, s-1:s] = k
-            self.vCache[:, s-1:s] = v
+            print(f">>> k in shape {k.shape}")
+            print(f">>> cache in shape {self.kCache.shape}")
             k = self.kCache[:, :s]
             v = self.vCache[:, :s]
-
+            self.kCache = ops.concat((self.kCache, k), axis=1)
+            self.vCache = ops.concat((self.vCache, v), axis=1)
         # (b, s, nh, h1)
         q = q.view(b, s, self.numHeads, self.headDim)
         k = k.view(b, s, self.numHeads, self.headDim)
@@ -156,25 +155,26 @@ def lazyParameter(shape, name):
             name = name
         )
 
-class OPTInputEmbed(nn.Cell):
+class InputEmbed(nn.Cell):
     def __init__(self, config:Config):
         super().__init__()
         self.tokenEmbedWeight = lazyParameter(shape=(config.vocabSize, config.hiddenSize), name="embed_tokens.weight")
         self.posEmbedWeight = lazyParameter(shape=(config.maxSeqLen + 2, config.hiddenSize), name="embed_positions.weight")
-        self.cumsum = ops.CumSum()
         self.gather = ops.operations.Gather()
         self.add = ops.Add()
 
-    def construct(self, inputIDs, attentionMask:Tensor):
+    def construct(self, inputIDs:Tensor, attentionMask:Tensor):
         # attention mask in shape (b, s)
-
+        print(">>> inputIDs shape is: ", inputIDs.shape)
+        print(">>> attentionMask shape is: ", attentionMask.shape)
         tokenEmbed = self.gather(self.tokenEmbedWeight, inputIDs, 0)
 
         # posIds in shape (b, s)
         posIds = ops.cumsum(attentionMask, axis=1)
+        print(">>> posIds shape is: ", posIds.shape)
         
         posEmbed = self.gather(self.posEmbedWeight, posIds, 0)
-        
+
         embed = self.add(tokenEmbed, posEmbed)
         return embed
 
@@ -184,7 +184,7 @@ class OPTInputEmbed(nn.Cell):
         
 
 
-class OPTOutputEmbed(nn.Cell):
+class OutputEmbed(nn.Cell):
     def __init__(self, config:Config):
         super().__init__()
         self.tokenWeight = lazyParameter(shape=(config.vocabSize, config.hiddenSize), name="embed_tokens.weight.ref")
@@ -211,13 +211,13 @@ class OPT(nn.Cell):
         self.tokenizer = AutoTokenizer.from_pretrained(config.tokenizer) 
         
         layers = nn.SequentialCell()
-        self.inputEmbed = OPTInputEmbed(config)
+        self.inputEmbed = InputEmbed(config)
 
         for i in range(config.numHiddenLayer):
             layers.append(
                 TransformerLayer(config = config)
             )
-        self.outputEmbed = OPTOutputEmbed(config)  
+        self.outputEmbed = OutputEmbed(config)  
         
         self.layers = layers
         
@@ -260,41 +260,36 @@ class OPT(nn.Cell):
 
     def runIter(self, i, currLen):
         bs = self.tokensBuffer.shape[0]
-        attentionMask = ops.ones(shape=(bs, currLen), dtype=dtype.int32)
+        attentionMask = Tensor(np.ones(shape=(bs, currLen)), dtype=dtype.int32)
 
-        if i == 0:  # prefill stage
-            inputEmbed = self.tokensBuffer[:, :currLen]
-        else :
-            # should get a input of shape (b, h) -> (b, 1, h)
-            inputEmbed = self.tokensBuffer[:, currLen-1:currLen]
-        h = self.inputEmbed(inputEmbed, attentionMask)
+        # inputEmbed in shape (b, s)
+        inputEmbed = self.tokensBuffer[:, :currLen]
+        h = self.inputEmbed(inputEmbed, attentionMask, i)
 
         for l in self.layers:
             h = l(h, i) 
         
+        if i == 0:
+            h = h[:, -1]
         # o should be in shape (b, )
         o = self.outputEmbed(h)
-        self.tokensBuffer[:,currLen] = o
-
-                
+        o = o.unsqueeze(dim=1)
+        print(f">>> o inshape {o.shape}")
+        
+        self.tokensBuffer = ops.concat((self.tokensBuffer, o), axis=1)
+        print(f">>> tokensBuffer inshape {self.tokensBuffer.shape}")
             
     def run(self, inputSentences: list[str]):
         promptLen = max([len(l) for l in inputSentences])
         inputTokens = self.tokenizer(inputSentences, padding="max_length",  max_length=promptLen).input_ids
-        tokensTensor = Tensor(inputTokens) 
+        self.tokensBuffer = Tensor(inputTokens, dtype=dtype.int32) 
 
-        b, s = tokensTensor.shape
-        self.tokensBuffer = Tensor(init=Zero(), dtype=dtype.int32, 
-                                   shape=(b, self.maxSeqLen))
-
-        self.tokensBuffer[:, :s] = tokensTensor
-        
         maxIter = 16 
         
         print(">>> inference begin")
         for i in range(maxIter):
             print(f"    >>> loop {i} begin")
-            self.runIter(i, s+i)
+            self.runIter(i, promptLen+i)
 
         print("<<< inference end")
         outputSentences = []
