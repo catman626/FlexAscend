@@ -78,6 +78,7 @@ class Attention(nn.Cell):
             v = self.vCache[:, :s]
             self.kCache = ops.concat((self.kCache, k), axis=1)
             self.vCache = ops.concat((self.vCache, v), axis=1)
+
         # (b, s, nh, h1)
         q = q.view(b, s, self.numHeads, self.headDim)
         k = k.view(b, s, self.numHeads, self.headDim)
@@ -87,10 +88,13 @@ class Attention(nn.Cell):
         k = ops.permute(k, (0, 2, 3, 1))
         v = ops.permute(v, (0, 2, 1, 3))
 
+        print(f" >>> q.shape: {q.shape}")
+        print(f" >>> k.shape: {k.shape}")
+        print(f" >>> v.shape: {v.shape}")
         # output shape (b, nh, s, s)
         score = self.batchMatMul(q, k)
 
-        ids = ops.arange(end=s)
+        ids = ops.arange(0, s)
         casualMask = ids <= ids.view(s, 1)
         if attentionMask is not None:
             mask = casualMask.view(1, 1, s, s) & attentionMask.view(b, 1, s, s)
@@ -264,7 +268,7 @@ class OPT(nn.Cell):
 
         # inputEmbed in shape (b, s)
         inputEmbed = self.tokensBuffer[:, :currLen]
-        h = self.inputEmbed(inputEmbed, attentionMask, i)
+        h = self.inputEmbed(inputEmbed, attentionMask)
 
         for l in self.layers:
             h = l(h, i) 

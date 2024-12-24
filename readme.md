@@ -1,0 +1,3 @@
+- `model` 
+  - only configurations
+  - no weight files

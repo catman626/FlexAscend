@@ -1,1 +1,1 @@
-python opt.py --ckpt model/weight/opt-125m.ckpt --tokenizer model/opt-125m
+python opt.py --ckpt model/opt-125m/mindspore_model.ckpt --tokenizer model/opt-125m
