@@ -55,10 +55,8 @@ class Attention(nn.Cell):
         
         self.residual = ops.Add()
     
-        
     def construct(self, x, iterNo, attentionMask=None):
         """ all in form (b, s, h)  """
-
         b, s, h = x.shape
 
         normalX = self.attnLayerNorm(x)
@@ -69,28 +67,30 @@ class Attention(nn.Cell):
             # q,k,v in shape (b, s, h)
             self.kCache = k
             self.vCache = v
+
+            # (b, s, nh, h1)
+            q = q.view(b, s, self.numHeads, self.headDim)
+            k = k.view(b, s, self.numHeads, self.headDim)
+            v = v.view(b, s, self.numHeads, self.headDim)
             
         else :
             # q,k,v in shape (b, 1, h)
-            print(f">>> k in shape {k.shape}")
-            print(f">>> cache in shape {self.kCache.shape}")
-            k = self.kCache[:, :s]
-            v = self.vCache[:, :s]
+            assert k.shape[1] == 1, f"k.shape is {k.shape}"
             self.kCache = ops.concat((self.kCache, k), axis=1)
             self.vCache = ops.concat((self.vCache, v), axis=1)
+            k = self.kCache
+            v = self.vCache
+            s = self.kCache.shape[1]
 
-        # (b, s, nh, h1)
-        q = q.view(b, s, self.numHeads, self.headDim)
-        k = k.view(b, s, self.numHeads, self.headDim)
-        v = v.view(b, s, self.numHeads, self.headDim)
+            # (b, s, nh, h1)
+            q = q.view(b, s, self.numHeads, self.headDim)
+            k = k.view(b, s, self.numHeads, self.headDim)
+            v = v.view(b, s, self.numHeads, self.headDim)
 
         q = ops.permute(q, (0, 2, 1, 3))
         k = ops.permute(k, (0, 2, 3, 1))
         v = ops.permute(v, (0, 2, 1, 3))
 
-        print(f" >>> q.shape: {q.shape}")
-        print(f" >>> k.shape: {k.shape}")
-        print(f" >>> v.shape: {v.shape}")
         # output shape (b, nh, s, s)
         score = self.batchMatMul(q, k)
 
@@ -168,18 +168,21 @@ class InputEmbed(nn.Cell):
         self.add = ops.Add()
 
     def construct(self, inputIDs:Tensor, attentionMask:Tensor):
-        # attention mask in shape (b, s)
-        print(">>> inputIDs shape is: ", inputIDs.shape)
-        print(">>> attentionMask shape is: ", attentionMask.shape)
+        """
+        input : (B, S)
+        each element is an idx
+        """
+        assert len(inputIDs.shape) == 2
+        
         tokenEmbed = self.gather(self.tokenEmbedWeight, inputIDs, 0)
 
-        # posIds in shape (b, s)
         posIds = ops.cumsum(attentionMask, axis=1)
-        print(">>> posIds shape is: ", posIds.shape)
         
         posEmbed = self.gather(self.posEmbedWeight, posIds, 0)
 
         embed = self.add(tokenEmbed, posEmbed)
+        
+        assert len(embed.shape) == 3
         return embed
 
     # def loadWeight(self, tokenEmbedWeight, posEmbedWeight):
@@ -203,8 +206,9 @@ class OutputEmbed(nn.Cell):
         normalized = self.norm(x)
         
         output = self.matmul(normalized, self.tokenWeight)
-        
-        return self.argmax(output)
+        outputIDs = self.argmax(output)
+        assert len(outputIDs.shape) == 2   # output shape: (B, S), element is id
+        return outputIDs
     
     
 class OPT(nn.Cell):
@@ -263,25 +267,25 @@ class OPT(nn.Cell):
             exit(1)
 
     def runIter(self, i, currLen):
-        bs = self.tokensBuffer.shape[0]
-        attentionMask = Tensor(np.ones(shape=(bs, currLen)), dtype=dtype.int32)
+        B = self.tokensBuffer.shape[0]
+        attentionMask = Tensor(np.ones(shape=(B, currLen)), dtype=dtype.int32)
 
         # inputEmbed in shape (b, s)
-        inputEmbed = self.tokensBuffer[:, :currLen]
-        h = self.inputEmbed(inputEmbed, attentionMask)
-
+        inputIDs = self.tokensBuffer[:, :currLen] if i == 0 \
+            else self.tokensBuffer[:, -1:]
+        
+        
+        h = self.inputEmbed(inputIDs, attentionMask)
         for l in self.layers:
             h = l(h, i) 
-        
-        if i == 0:
-            h = h[:, -1]
+            if i == 0:
+                h = h[:, -1:]
         # o should be in shape (b, )
         o = self.outputEmbed(h)
         o = o.unsqueeze(dim=1)
         print(f">>> o inshape {o.shape}")
         
         self.tokensBuffer = ops.concat((self.tokensBuffer, o), axis=1)
-        print(f">>> tokensBuffer inshape {self.tokensBuffer.shape}")
             
     def run(self, inputSentences: list[str]):
         promptLen = max([len(l) for l in inputSentences])
@@ -291,9 +295,12 @@ class OPT(nn.Cell):
         maxIter = 16 
         
         print(">>> inference begin")
+        print(f">>> tokensBuffer inshape {self.tokensBuffer.shape}")
         for i in range(maxIter):
             print(f"    >>> loop {i} begin")
+            print(f"    >>> tokensBuffer inshape {self.tokensBuffer.shape}")
             self.runIter(i, promptLen+i)
+            
 
         print("<<< inference end")
         outputSentences = []
