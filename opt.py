@@ -277,6 +277,7 @@ class OutputEmbed(nn.Cell):
         normalized = self.norm(x)
         
         output = self.matmul(normalized, self.tokenWeight)
+        print(f">>> before argmax, output is {output}")
         outputIDs = self.argmax(output)
         assert len(outputIDs.shape) == 2   # output shape: (B, S), element is id
         return outputIDs
