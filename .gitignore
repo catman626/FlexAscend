@@ -1,5 +1,7 @@
 checkpoint_download
-model/weight
+*.zip
+*.bin
+*.msgpack
 *.ckpt
-*model.bin
+*.h5
 

@@ -13,22 +13,41 @@ import argparse
 from tqdm import tqdm
 
 class Config:
-    def __init__(self):        
+    def __init__(self, name,
+            maxSeqLen, numHiddenLayer, nHead,
+            hiddenSize, inputDim, ffnEmbedDim,
+        ):
+        self.modelName = name
         self.dtype = dtype.float16
         self.hasBias = True
-        self.maxSeqLen=2048
-        self.inputLen = 512
+        self.maxSeqLen= maxSeqLen
+        self.inputLen = inputDim
         self.batchSize = 64
 
-        self.numHiddenLayer = 12
+        self.numHiddenLayer = numHiddenLayer
         self.vocabSize = 50272
         self.weightFname = None
         self.localTokenizer = "opt-1.3b"
-        self.numHeads=12
-        self.hiddenSize=768
-        self.ffnHiddenSize = 4 * self.hiddenSize
+        self.numHeads= nHead
+        self.hiddenSize=hiddenSize
+        self.ffnHiddenSize = ffnEmbedDim
         self.tokenizer = None
 
+def getOptConfig(name)->Config:
+    if name == "opt-125m":
+        config = Config(name=name,
+            maxSeqLen=2048, numHiddenLayer=12, nHead=12,
+            hiddenSize=768, inputDim=768, ffnEmbedDim=768 * 4,
+        )
+    elif name == "opt-1.3b":
+        config = Config(name=name,
+            maxSeqLen=2048, numHiddenLayer=24, nHead=32,
+            hiddenSize=2048, inputDim=2048, ffnEmbedDim=2048 * 4,
+        )
+    else :
+        raise NotImplementedError(f"unsupported name: {name}")
+
+    return config
 
 
 class Attention(nn.Cell):
@@ -372,13 +391,15 @@ class OPT(nn.Cell):
 import argparse
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    
     parser.add_argument("--ckpt", type=str, required=True)
     parser.add_argument("--tokenizer", type=str, default="/home/ma-user/work/FlexAscend/model/opt-1.3b")
+    parser.add_argument("--model", type=str, required=True)
 
     args = parser.parse_args()
 
 
-    config = Config()
+    config = getOptConfig(args.model)
     config.weightFname = args.ckpt
     config.tokenizer = args.tokenizer
 
