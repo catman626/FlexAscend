@@ -334,7 +334,8 @@ class OPT(nn.Cell):
         o = self.outputEmbed(h)
         print(f">>> o inshape {o.shape}")
         
-        self.tokensBuffer = ops.concat((self.tokensBuffer, o), axis=1)
+        if i == 0:
+            self.tokensBuffer = ops.concat((self.tokensBuffer, o[:,-1:]), axis=1)
         
             
     def run(self, inputSentences: list[str]):
