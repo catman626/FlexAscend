@@ -335,7 +335,12 @@ class OPT(nn.Cell):
         print(f">>> o inshape {o.shape}")
         
         if i == 0:
+            assert o.shape == (B, currLen)
             self.tokensBuffer = ops.concat((self.tokensBuffer, o[:,-1:]), axis=1)
+        else :
+            assert o.shape[1] == 1
+            self.tokensBuffer = ops.concat((self.tokensBuffer, o), axis=1)
+            
         
             
     def run(self, inputSentences: list[str]):
@@ -380,8 +385,8 @@ if __name__ == "__main__":
     model = OPT(config)
 
     inputs = [
-        "hello!",
-        "the largest cat in the world is:"
+        "hello! ",
+        "the largest cat in the world is "
     ]
 
     outputs = model.run(inputs)
