@@ -54,8 +54,8 @@ class Attention(nn.Cell):
         self.batchMatMulSV = ops.BatchMatMul()
         
         self.residual = ops.Add()
-    
-    def construct(self, x, iterNo, attentionMask=None):
+
+    def prefill(self, x, attentionMask=None):
         """ all in form (b, s, h)  """
         b, s, h = x.shape
 
@@ -63,37 +63,23 @@ class Attention(nn.Cell):
         # (b, s, h)
         q, k, v = self.qProj(normalX), self.kProj(normalX), self.vProj(normalX)
 
-        if iterNo == 0:
-            # q,k,v in shape (b, s, h)
-            self.kCache = k
-            self.vCache = v
+        self.kCache = k
+        self.vCache = v
 
-            # (b, s, nh, h1)
-            q = q.view(b, s, self.numHeads, self.headDim)
-            k = k.view(b, s, self.numHeads, self.headDim)
-            v = v.view(b, s, self.numHeads, self.headDim)
-            
-        else :
-            # q,k,v in shape (b, 1, h)
-            assert k.shape[1] == 1, f"k.shape is {k.shape}"
-            self.kCache = ops.concat((self.kCache, k), axis=1)
-            self.vCache = ops.concat((self.vCache, v), axis=1)
-            k = self.kCache
-            v = self.vCache
-            s = self.kCache.shape[1]
-
-            # (b, s, nh, h1)
-            q = q.view(b, s, self.numHeads, self.headDim)
-            k = k.view(b, s, self.numHeads, self.headDim)
-            v = v.view(b, s, self.numHeads, self.headDim)
+        # (b, s, nh, h1)
+        q = q.view(b, s, self.numHeads, self.headDim)
+        k = k.view(b, s, self.numHeads, self.headDim)
+        v = v.view(b, s, self.numHeads, self.headDim)
 
         q = ops.permute(q, (0, 2, 1, 3))
         k = ops.permute(k, (0, 2, 3, 1))
         v = ops.permute(v, (0, 2, 1, 3))
 
+        # QKT
         # output shape (b, nh, s, s)
         score = self.batchMatMul(q, k)
 
+        # mask
         ids = ops.arange(0, s)
         casualMask = ids <= ids.view(s, 1)
         if attentionMask is not None:
@@ -115,6 +101,64 @@ class Attention(nn.Cell):
         attnOut = self.residual(attnOut, x)
 
         return attnOut
+        
+    
+    def decode(self, x, iterNo, attentionMask=None):
+        """
+        x.shape (b, 1, h)
+        attentionMask in shape (b, 1, s)
+        """
+        b, s, h = x.shape
+        assert s == 1
+
+        normalX = self.attnLayerNorm(x)
+        # (b, s, h)
+        q, k, v = self.qProj(normalX), self.kProj(normalX), self.vProj(normalX)
+
+        # q,k,v in shape (b, 1, h)
+        assert k.shape[1] == 1, f"k.shape is {k.shape}"
+        self.kCache = ops.concat((self.kCache, k), axis=1)
+        self.vCache = ops.concat((self.vCache, v), axis=1)
+        k = self.kCache
+        v = self.vCache
+        s = self.kCache.shape[1]
+        
+        # s include the token generated in this iteration
+
+        # (b, 1, nh, h1)
+        q = q.view(b, 1, self.numHeads, self.headDim)
+        k = k.view(b, s, self.numHeads, self.headDim)
+        v = v.view(b, s, self.numHeads, self.headDim)
+
+        q = ops.permute(q, (0, 2, 1, 3))
+        k = ops.permute(k, (0, 2, 3, 1))
+        v = ops.permute(v, (0, 2, 1, 3))
+
+        # output shape (b, nh, s, s)
+        score = self.batchMatMul(q, k)
+
+        # mask
+        if attentionMask is not None:
+            score = ops.where(attentionMask.view(b, 1, 1, s), score, -1e4)
+        score = self.softmax(score)
+
+        # (b, nh, 1, s) * (b, nh, s, h1) -> (b, nh, 1, h1)
+        attnOut = self.batchMatMulSV(score, v)        
+        
+        # (b, nh, 1, h1) -> (b, 1, nh, h1) -> (b, 1, h)
+        attnOut = ops.permute(attnOut, (0, 2, 1, 3)).flatten(start_dim=2)
+
+        attnOut = self.outProj(attnOut)
+        attnOut = self.residual(attnOut, x)
+
+        return attnOut
+
+    def construct(self, x, iterNo, attentionMask=None):
+        assert attentionMask is None or len( attentionMask.shape ) == 2
+        if iterNo == 0:
+            return self.prefill(x, attentionMask)
+        else :
+            return self.decode(x, iterNo, attentionMask)
         
 
 class FeedForward(nn.Cell):
@@ -169,8 +213,9 @@ class InputEmbed(nn.Cell):
 
     def construct(self, inputIDs:Tensor, attentionMask:Tensor):
         """
-        input : (B, S)
+        inputIDs : (B, S) / (B, 1)
         each element is an idx
+        attentionMask: (B, S)
         """
         assert len(inputIDs.shape) == 2
         
@@ -178,8 +223,15 @@ class InputEmbed(nn.Cell):
 
         posIds = ops.cumsum(attentionMask, axis=1)
         
+        
         posEmbed = self.gather(self.posEmbedWeight, posIds, 0)
 
+        currLength = attentionMask.shape[1]
+        inputIDLength = inputIDs.shape[1]
+        previousIDsLength = currLength - inputIDLength
+        posEmbed = posEmbed[:, previousIDsLength:]
+
+        assert tokenEmbed.shape == posEmbed.shape
         embed = self.add(tokenEmbed, posEmbed)
         
         assert len(embed.shape) == 3
@@ -278,14 +330,12 @@ class OPT(nn.Cell):
         h = self.inputEmbed(inputIDs, attentionMask)
         for l in self.layers:
             h = l(h, i) 
-            if i == 0:
-                h = h[:, -1:]
         # o should be in shape (b, )
         o = self.outputEmbed(h)
-        o = o.unsqueeze(dim=1)
         print(f">>> o inshape {o.shape}")
         
         self.tokensBuffer = ops.concat((self.tokensBuffer, o), axis=1)
+        
             
     def run(self, inputSentences: list[str]):
         promptLen = max([len(l) for l in inputSentences])
