@@ -9,7 +9,7 @@ import os
 
 from mindspore.numpy import ones
 
-os.environ["TOKENIZERS_PARALLELISM"] = False
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import argparse
 from tqdm import tqdm
@@ -34,6 +34,7 @@ class Config:
         self.hiddenSize=hiddenSize
         self.ffnHiddenSize = ffnEmbedDim
         self.tokenizer = None
+        self.padTokenID :int = 1
 
 def getOptConfig(name)->Config:
     if name == "opt-125m":
@@ -291,9 +292,9 @@ class OutputEmbed(nn.Cell):
 class OPT(nn.Cell):
     def __init__(self, config:Config):
         super().__init__()
-        self.numLayers = config.numHiddenLayer
-        
-        self.tokenizer = AutoTokenizer.from_pretrained(config.tokenizer) 
+        self.config = config
+        self.numLayers = config.numHiddenLayer  
+        self.tokenizer = AutoTokenizer.from_pretrained(config.tokenizer, padding_side="left") 
         
         layers = nn.SequentialCell()
         self.inputEmbed = InputEmbed(config)
@@ -345,14 +346,14 @@ class OPT(nn.Cell):
 
     def runIter(self, i, currLen):
         B = self.tokensBuffer.shape[0]
-        attentionMask = Tensor(np.ones(shape=(B, currLen)), dtype=dtype.int32)
 
+        
         # inputEmbed in shape (b, s)
         inputIDs = self.tokensBuffer[:, :currLen] if i == 0 \
             else self.tokensBuffer[:, -1:]
         
-        
-        h = self.inputEmbed(inputIDs, attentionMask)
+        print(f">>> input mask: {self.attentionMask}")
+        h = self.inputEmbed(inputIDs, self.attentionMask)
         for l in self.layers:
             h = l(h, i) 
         # o should be in shape (b, )
@@ -360,14 +361,10 @@ class OPT(nn.Cell):
         o = self.outputEmbed(h)
         print(f">>> o inshape {o.shape}")
         
-        if i == 0:
-            assert o.shape == (B, currLen)
-            self.tokensBuffer = ops.concat((self.tokensBuffer, o[:,-1:]), axis=1)
-        else :
-            assert o.shape[1] == 1
-            self.tokensBuffer = ops.concat((self.tokensBuffer, o), axis=1)
-            
-        
+        self.tokensBuffer = ops.concat((self.tokensBuffer, o), axis=1)
+        self.attentionMask = ops.concat(
+            (self.attentionMask, Tensor(np.ones(B,  1) ) ), 
+            axis=1)
             
     def run(self, inputSentences: list[str]):
         promptLen = max([len(l) for l in inputSentences])
@@ -375,7 +372,10 @@ class OPT(nn.Cell):
         self.tokensBuffer = Tensor(inputTokens, dtype=dtype.int32) 
         print(f"input tokens is: {inputTokens}")
 
+        
         maxIter = 16 
+
+        self.attentionMask = (inputTokens == self.config.padTokenID)
         
         print(">>> inference begin")
         print(f">>> tokensBuffer inshape {self.tokensBuffer.shape}")
@@ -386,6 +386,8 @@ class OPT(nn.Cell):
             
 
         print("<<< inference end")
+        print(f">>> final tokens length: {self.tokensBuffer.shape}")
+        print(f">>> final tokens: {self.tokensBuffer}")
         outputSentences = []
         
         for line in self.tokensBuffer.tolist():
@@ -414,11 +416,10 @@ if __name__ == "__main__":
     model = OPT(config)
 
     inputs = [
-        "the largest cat in the world is ",
-        "the largest cat in the world is "
+        "the largest cat in the world is",
+        "the largest cat in the world is"
     ]
 
     outputs = model.run(inputs)
     for s in outputs:
         print(s)
-
