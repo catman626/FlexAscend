@@ -1,5 +1,5 @@
 - `model` 
-  - only configurations
-  - no weight files
--`api`
-  - test api in mindspore
+  - only configurations  
+  - no weight files  
+-`api`  
+  - test api in mindspore  
