@@ -372,9 +372,9 @@ class OPT(nn.Cell):
         self.tokensBuffer = Tensor(inputTokens, dtype=dtype.int32) 
         print(f"input tokens is: {inputTokens}")
 
-        
         maxIter = 16 
-
+        
+        # init attention mask
         self.attentionMask = (inputTokens == self.config.padTokenID)
         
         print(">>> inference begin")
