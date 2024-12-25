@@ -247,6 +247,8 @@ class OutputEmbed(nn.Cell):
         assert len(outputIDs.shape) == 2   # output shape: (B, S), element is id
         return outputIDs
     
+def mhaNameToWeightName(name) :
+    
     
 class OPT(nn.Cell):
     def __init__(self, config:Config):
@@ -271,7 +273,6 @@ class OPT(nn.Cell):
         self.tokensBuffer: Tensor = None
         self.maxSeqLen = config.maxSeqLen
         self.attentionMask :Tensor = None   # true : valid, false : neglect
-        
 
     def loadWeight(self, weightFname):
         assert isinstance(weightFname, str)
@@ -287,6 +288,17 @@ class OPT(nn.Cell):
             else:
                 param.set_data(weights[name])
                 unusedWeight.remove(name)
+
+        # load mha weight
+        for name, param in tqdm(uninitializedInNet):
+            if name.find("mha") != -1:
+                if (mhaNameToWeightName(name) in unusedWeight) :
+                    param.set_data(weights[mhaNameToWeightName(name)])
+                    unusedWeight.remove(name)
+            
+                    
+
+                
                 
         print("<<< load weight finish")
         if uninitializedInNet:
