@@ -374,16 +374,12 @@ class OPT(nn.Cell):
         assert isinstance(self.attentionMask, Tensor)
         
         print(">>> inference begin")
-        print(f">>> tokensBuffer inshape {self.tokensBuffer.shape}")
         for i in range(maxIter):
             print(f"    >>> loop {i} begin")
-            print(f"    >>> tokensBuffer inshape {self.tokensBuffer.shape}")
             self.runIter(i, promptLen+i)
             
 
         print("<<< inference end")
-        print(f">>> final tokens length: {self.tokensBuffer.shape}")
-        print(f">>> final tokens: {self.tokensBuffer}")
         outputSentences = []
         
         for line in self.tokensBuffer.tolist():
