@@ -5,9 +5,11 @@ from mindspore import load_checkpoint
 import math
 import abc
 import numpy as np
+import os
 
 from mindspore.numpy import ones
 
+os.environ["TOKENIZERS_PARALLELISM"] = False
 
 import argparse
 from tqdm import tqdm
@@ -242,7 +244,6 @@ class InputEmbed(nn.Cell):
 
         posIds = ops.cumsum(attentionMask, axis=1)
         
-        
         posEmbed = self.gather(self.posEmbedWeight, posIds, 0)
 
         currLength = attentionMask.shape[1]
@@ -277,8 +278,12 @@ class OutputEmbed(nn.Cell):
         normalized = self.norm(x)
         
         output = self.matmul(normalized, self.tokenWeight)
-        print(f">>> before argmax, output is {output}")
+        print(f">>> before argmax, output[0] is {output[0]}, shape: {output[0].shape}")  # (vocab)
+        
+        
         outputIDs = self.argmax(output)
+        print(f">>> after argmax, output[0] is {outputIDs[0]}, shape: {outputIDs[0].shape}")
+        
         assert len(outputIDs.shape) == 2   # output shape: (B, S), element is id
         return outputIDs
     
@@ -351,6 +356,7 @@ class OPT(nn.Cell):
         for l in self.layers:
             h = l(h, i) 
         # o should be in shape (b, )
+        h = h[:, -1:]
         o = self.outputEmbed(h)
         print(f">>> o inshape {o.shape}")
         
@@ -367,6 +373,7 @@ class OPT(nn.Cell):
         promptLen = max([len(l) for l in inputSentences])
         inputTokens = self.tokenizer(inputSentences, padding="max_length",  max_length=promptLen).input_ids
         self.tokensBuffer = Tensor(inputTokens, dtype=dtype.int32) 
+        print(f"input tokens is: {inputTokens}")
 
         maxIter = 16 
         
@@ -407,7 +414,7 @@ if __name__ == "__main__":
     model = OPT(config)
 
     inputs = [
-        "hello! ",
+        "the largest cat in the world is ",
         "the largest cat in the world is "
     ]
 
