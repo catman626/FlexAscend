@@ -71,13 +71,20 @@ class Attention(nn.Cell):
 
         self.attnLayerNorm = nn.LayerNorm(normalized_shape=(hiddenSize, ))
 
-        self.batchMatMul = ops.BatchMatMul()    # transpose handled in construct:premute
-        self.softmax = nn.Softmax()
-        self.batchMatMulSV = ops.BatchMatMul()
+        self.attn = nn.MultiheadAttention(config.hiddenSize, 
+                                          config.numHeads, 
+                                          dropout=0, 
+                                          has_bias=True, 
+                                          batch_first=True,
+                                          dtype=dtype.float16)
+
+        # self.batchMatMul = ops.BatchMatMul()    # transpose handled in construct:premute
+        # self.softmax = nn.Softmax()
+        # self.batchMatMulSV = ops.BatchMatMul()
         
         self.residual = ops.Add()
 
-    def prefill(self, x, attentionMask=None):
+    def prefill(self, x, attentionMask):
         """ all in form (b, s, h)  """
         b, s, h = x.shape
 
@@ -88,44 +95,26 @@ class Attention(nn.Cell):
         self.kCache = k
         self.vCache = v
 
-        # (b, s, nh, h1)
-        q = q.view(b, s, self.numHeads, self.headDim)
-        k = k.view(b, s, self.numHeads, self.headDim)
-        v = v.view(b, s, self.numHeads, self.headDim)
-
-        q = ops.permute(q, (0, 2, 1, 3))
-        k = ops.permute(k, (0, 2, 3, 1))
-        v = ops.permute(v, (0, 2, 1, 3))
-
-        # QKT
-        # output shape (b, nh, s, s)
-        score = self.batchMatMul(q, k)
-
         # mask
         ids = ops.arange(0, s)
         casualMask = ids <= ids.view(s, 1)
-        if attentionMask is not None:
-            mask = casualMask.view(1, 1, s, s) & attentionMask.view(b, 1, s, s)
-        else :
-            mask = casualMask.view(1, 1, s, s) 
-        
-        score = ops.where(mask, score, -1e4)
-        score = self.softmax(score)
+        assert casualMask.dtype == dtype.bool_
+        assert attentionMask.dtype == dtype.bool_
 
-        # (b, nh, s, s) * (b, nh, s, h1) -> (b, nh, s, h1)
-        attnOut = self.batchMatMulSV(score, v)        
+        # output: (b, s, h)
+        mhaOut = self.attn(q, k, v, 
+                              key_padding_mask=attentionMask, 
+                              need_weights = False, 
+                              attn_mask=casualMask)
         
-        # (b, nh, s, h1) -> (b, s, nh, h1) -> (b, s, h)
-        attnOut = ops.permute(attnOut, (0, 2, 1, 3)).flatten(start_dim=2)
-        
-        attnOut = self.outProj(attnOut)
+        o = self.outProj(mhaOut)
 
-        attnOut = self.residual(attnOut, x)
+        o = self.residual(o, x)
 
-        return attnOut
+        return o
         
     
-    def decode(self, x, iterNo, attentionMask=None):
+    def decode(self, x, attentionMask=None):
         """
         x.shape (b, 1, h)
         attentionMask in shape (b, 1, s)
@@ -175,12 +164,12 @@ class Attention(nn.Cell):
 
         return attnOut
 
-    def construct(self, x, iterNo, attentionMask=None):
+    def construct(self, x, iterNo, attentionMask):
         assert attentionMask is None or len( attentionMask.shape ) == 2
         if iterNo == 0:
             return self.prefill(x, attentionMask)
         else :
-            return self.decode(x, iterNo, attentionMask)
+            return self.decode(x, attentionMask)
         
 
 class FeedForward(nn.Cell):
