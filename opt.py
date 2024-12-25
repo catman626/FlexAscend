@@ -240,6 +240,8 @@ class InputEmbed(nn.Cell):
         attentionMask: (B, S)
         """
         assert len(inputIDs.shape) == 2
+        assert isinstance(inputIDs, Tensor)
+        assert isinstance(attentionMask, Tensor)
         
         tokenEmbed = self.gather(self.tokenEmbedWeight, inputIDs, 0)
 
@@ -258,12 +260,6 @@ class InputEmbed(nn.Cell):
         assert len(embed.shape) == 3
         return embed
 
-    # def loadWeight(self, tokenEmbedWeight, posEmbedWeight):
-    #     self.tokenEmbedWeight.set_data(tokenEmbedWeight)
-    #     self.posEmbedWeight.set_data(shape=)
-        
-
-
 class OutputEmbed(nn.Cell):
     def __init__(self, config:Config):
         super().__init__()
@@ -280,7 +276,6 @@ class OutputEmbed(nn.Cell):
         
         output = self.matmul(normalized, self.tokenWeight)
         print(f">>> before argmax, output[0] is {output[0]}, shape: {output[0].shape}")  # (vocab)
-        
         
         outputIDs = self.argmax(output)
         print(f">>> after argmax, output[0] is {outputIDs[0]}, shape: {outputIDs[0].shape}")
@@ -363,7 +358,7 @@ class OPT(nn.Cell):
         
         self.tokensBuffer = ops.concat((self.tokensBuffer, o), axis=1)
         self.attentionMask = ops.concat(
-            (self.attentionMask, Tensor(np.ones(B,  1) ) ), 
+            (self.attentionMask, Tensor(np.ones(shape=(B,  1), dtype=np.int32)) ), 
             axis=1)
             
     def run(self, inputSentences: list[str]):
@@ -375,7 +370,8 @@ class OPT(nn.Cell):
         maxIter = 16 
         
         # init attention mask
-        self.attentionMask = (inputTokens == self.config.padTokenID)
+        self.attentionMask = (self.tokensBuffer != self.config.padTokenID).to(dtype.int32)
+        assert isinstance(self.attentionMask, Tensor)
         
         print(">>> inference begin")
         print(f">>> tokensBuffer inshape {self.tokensBuffer.shape}")
