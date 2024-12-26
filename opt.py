@@ -84,12 +84,13 @@ class Attention(nn.Cell):
         normalX = self.attnLayerNorm(x)
         # (b, s, h)
         q, k, v = self.qProj(normalX), self.kProj(normalX), self.vProj(normalX)
+        scaling = self.headDim ** -0.5
 
         self.kCache = k
         self.vCache = v
 
         # (b, s, nh, h1)
-        q = q.view(b, s, self.numHeads, self.headDim)
+        q = q.view(b, s, self.numHeads, self.headDim) * scaling
         k = k.view(b, s, self.numHeads, self.headDim)
         v = v.view(b, s, self.numHeads, self.headDim)
 
@@ -136,6 +137,7 @@ class Attention(nn.Cell):
         normalX = self.attnLayerNorm(x)
         # (b, s, h)
         q, k, v = self.qProj(normalX), self.kProj(normalX), self.vProj(normalX)
+        scaling = self.headDim ** -0.5
 
         # q,k,v in shape (b, 1, h)
         assert k.shape[1] == 1, f"k.shape is {k.shape}"
@@ -148,7 +150,7 @@ class Attention(nn.Cell):
         # s include the token generated in this iteration
 
         # (b, 1, nh, h1)
-        q = q.view(b, 1, self.numHeads, self.headDim)
+        q = q.view(b, 1, self.numHeads, self.headDim) * scaling
         k = k.view(b, s, self.numHeads, self.headDim)
         v = v.view(b, s, self.numHeads, self.headDim)
 
