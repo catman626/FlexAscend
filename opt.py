@@ -58,16 +58,17 @@ class Attention(nn.Cell):
         super().__init__()
 
         self.headDim = headDim = config.hiddenSize // config.numHeads
+        self.dtype = config.dtype
         self.seqLength = config.maxSeqLen
         hiddenSize = config.hiddenSize
         self.normFactor = math.sqrt(self.headDim)
         self.numHeads = config.numHeads
         
-        self.qProj = nn.Dense(hiddenSize, hiddenSize)
-        self.kProj = nn.Dense(hiddenSize, hiddenSize)
-        self.vProj = nn.Dense(hiddenSize, hiddenSize)
+        self.qProj = nn.Dense(hiddenSize, hiddenSize, dtype=self.dtype)
+        self.kProj = nn.Dense(hiddenSize, hiddenSize, dtype=self.dtype)
+        self.vProj = nn.Dense(hiddenSize, hiddenSize, dtype=self.dtype)
 
-        self.outProj = nn.Dense(hiddenSize, hiddenSize)
+        self.outProj = nn.Dense(hiddenSize, hiddenSize, dtype=self.dtype)
 
         self.attnLayerNorm = nn.LayerNorm(normalized_shape=(hiddenSize, ))
 
@@ -76,7 +77,7 @@ class Attention(nn.Cell):
                                           dropout=0, 
                                           has_bias=True, 
                                           batch_first=True,
-                                          dtype=dtype.float16)
+                                          dtype=self.dtype)
         
         self.residual = ops.Add()
 
@@ -88,9 +89,6 @@ class Attention(nn.Cell):
         # (b, s, h)
         q, k, v = self.qProj(normalX), self.kProj(normalX), self.vProj(normalX)
 
-        self.kCache = k
-        self.vCache = v
-
         # mask
         ids = ops.arange(0, s)
         casualMask = ids <= ids.view(s, 1)
@@ -98,11 +96,16 @@ class Attention(nn.Cell):
         assert attentionMask.dtype == dtype.bool_
 
         # output: (b, s, h)
-        mhaOut = self.mha(q, k, v, 
+        mhaOut , = self.mha(q, k, v, 
                               key_padding_mask=attentionMask, 
                               need_weights = False, 
                               attn_mask=casualMask)
         
+        assert isinstance(mhaOut, Tensor), f"mhaOut is not Tensor, but {type(mhaOut)}"
+        
+        print(f">>> mhaOut value: {mhaOut}")
+
+        print(f">>> mhaOut value: {mhaOut}")
         o = self.outProj(mhaOut)
         o = self.residual(o, x)
         return o
@@ -120,15 +123,6 @@ class Attention(nn.Cell):
         # (b, s, h)
         q, k, v = self.qProj(normalX), self.kProj(normalX), self.vProj(normalX)
 
-        # q,k,v in shape (b, 1, h)
-        assert k.shape[1] == 1, f"k.shape is {k.shape}"
-        self.kCache = ops.concat((self.kCache, k), axis=1)
-        self.vCache = ops.concat((self.vCache, v), axis=1)
-        k = self.kCache
-        v = self.vCache
-        
-        # s include the token generated in this iteration
-
         mhaOut = self.mha(q, k, v,
                            key_padding_mask=attentionMask,
                            need_weights=False)
@@ -140,8 +134,9 @@ class Attention(nn.Cell):
 
     def construct(self, x, iterNo, attentionMask):
         assert attentionMask is None or len( attentionMask.shape ) == 2
-        assert x.dtype == dtype.float16
+        assert x.dtype == self.dtype
 
+        return self.prefill(x, attentionMask)
         if iterNo == 0:
             return self.prefill(x, attentionMask)
         else :
@@ -154,10 +149,11 @@ class FeedForward(nn.Cell):
         hiddenSize = config.hiddenSize
         ffnHiddenSize = config.ffnHiddenSize
         
+        self.dtype = config.dtype
         self.layerNorm = nn.LayerNorm(normalized_shape=(hiddenSize, ))
-        self.linear1 = nn.Dense(hiddenSize, ffnHiddenSize)
+        self.linear1 = nn.Dense(hiddenSize, ffnHiddenSize, dtype=self.dtype)
         self.relu = nn.ReLU()
-        self.linear2 = nn.Dense(ffnHiddenSize, hiddenSize)
+        self.linear2 = nn.Dense(ffnHiddenSize, hiddenSize, dtype=self.dtype)
         self.residual = ops.Add()
 
     def construct(self, x):
@@ -184,17 +180,15 @@ class TransformerLayer(nn.Cell):
 
         return ffnOut
 
-def lazyParameter(shape, name):
-    return Parameter(
-            initializer(init="normal", shape = shape),
-            name = name,
-        )
+def lazyParameter(shape, dtype):
+    return Parameter(initializer(init="normal", shape = shape, dtype=dtype))
 
 class InputEmbed(nn.Cell):
     def __init__(self, config:Config):
         super().__init__()
-        self.tokenEmbedWeight = lazyParameter(shape=(config.vocabSize, config.hiddenSize), name="embed_tokens.weight")
-        self.posEmbedWeight = lazyParameter(shape=(config.maxSeqLen + 2, config.hiddenSize), name="embed_positions.weight")
+        self.dtype = config.dtype
+        self.tokenEmbedWeight = lazyParameter(shape=(config.vocabSize, config.hiddenSize), dtype=self.dtype)
+        self.posEmbedWeight = lazyParameter(shape=(config.maxSeqLen + 2, config.hiddenSize), dtype=self.dtype)
         self.gather = ops.operations.Gather()
         self.add = ops.Add()
 
@@ -224,30 +218,31 @@ class InputEmbed(nn.Cell):
         
         assert len(embed.shape) == 3
         # assert embed.dtype == dtype.float16, f"invalid dtype: {embed.dtype}"
-        embed = embed.to(dtype.float16) 
+        embed = embed.to(self.dtype) 
         return embed
 
 class OutputEmbed(nn.Cell):
     def __init__(self, config:Config):
         super().__init__()
-        self.tokenWeight = lazyParameter(shape=(config.vocabSize, config.hiddenSize), name="embed_tokens.weight.ref")
+        self.dtype = config.dtype
+        self.tokenWeight = lazyParameter(shape=(config.vocabSize, config.hiddenSize), dtype=self.dtype)
         self.norm = nn.LayerNorm(normalized_shape=(config.hiddenSize, ), 
-                                 gamma_init=lazyParameter(shape=(config.hiddenSize, ), name="output_embed_layer_norm.weight"),
-                                 beta_init=lazyParameter(shape=(config.hiddenSize), name="output_embed_layer_norm.bias")
-)
+                                 gamma_init=lazyParameter(shape=(config.hiddenSize, ), dtype=self.dtype),
+                                 beta_init=lazyParameter(shape=(config.hiddenSize), dtype=self.dtype), dtype=self.dtype)
         self.matmul = ops.BatchMatMul(transpose_b=True)
         self.argmax = ops.Argmax()
     
     def construct(self, x):
         normalized = self.norm(x)
-        
-        output = self.matmul(normalized, self.tokenWeight)
-        print(f">>> before argmax, output[0] is {output[0]}, shape: {output[0].shape}")  # (vocab)
+
+        # output in shape (B, S, Vocab)
+        output = self.matmul(normalized, self.tokenWeight) 
         
         outputIDs = self.argmax(output)
-        print(f">>> after argmax, output[0] is {outputIDs[0]}, shape: {outputIDs[0].shape}")
         
-        assert len(outputIDs.shape) == 2   # output shape: (B, S), element is id
+        assert len(outputIDs.shape) == 2   # outputIDs shape: (B, S), element is id
+        
+        print(f">>> output is: {output[:, -1:]}")
         return outputIDs
     
 def mhaNameToWeightName(name) :
@@ -293,9 +288,9 @@ class OPT(nn.Cell):
                 unusedWeight.remove(name)
 
         # load mha weight
-        eye = np.eye(self.config.hiddenSize, dtype=np.float16)
+        eye = np.eye(self.config.hiddenSize)
         eye3 = np.concatenate([eye, eye, eye], axis=0) 
-        zeros = np.zeros((self.config.hiddenSize,), dtype=np.float16)
+        zeros = np.zeros((self.config.hiddenSize,))
         zeros3 = np.concatenate([zeros, zeros, zeros], axis=0) 
         
         for name, param in tqdm(self.parameters_and_names()):
@@ -305,19 +300,19 @@ class OPT(nn.Cell):
                 continue
             
             if name.find("in_proj_weight") != -1:
-                param.set_data(Tensor(eye3)) 
+                param.set_data(Tensor(eye3, dtype=self.config.dtype)) 
                 uninitializedInNet.remove(name)
 
             elif name.find("in_proj_bias") != -1:
-                param.set_data(Tensor(zeros3))
+                param.set_data(Tensor(zeros3, dtype=self.config.dtype))
                 uninitializedInNet.remove(name)
                 
             elif name.find("out_proj.weight") != -1:
-                param.set_data(Tensor(eye))
+                param.set_data(Tensor(eye, dtype=self.config.dtype))
                 uninitializedInNet.remove(name)
 
             elif name.find("out_proj.bias")  != -1:
-                param.set_data(Tensor(zeros))
+                param.set_data(Tensor(zeros, dtype=self.config.dtype))
                 uninitializedInNet.remove(name)
                 
         print("<<< load weight finish")
@@ -341,14 +336,12 @@ class OPT(nn.Cell):
         # inputEmbed in shape (b, s)
         inputIDs = self.tokensBuffer[:, :currLen]
         
-        print(f">>> input mask: {self.attentionMask}")
         h = self.inputEmbed(inputIDs, self.attentionMask)
         for l in self.layers:
             h = l(h, i, self.attentionMask) 
         # o should be in shape (b, )
         h = h[:, -1:]
         o = self.outputEmbed(h)
-        print(f">>> o inshape {o.shape}")
         
         self.tokensBuffer = ops.concat((self.tokensBuffer, o), axis=1)
         self.attentionMask = ops.concat(
@@ -361,7 +354,7 @@ class OPT(nn.Cell):
         self.tokensBuffer = Tensor(inputTokens, dtype=dtype.int32) 
         print(f"input tokens is: {inputTokens}")
 
-        maxIter = 16 
+        maxIter = 1 
         
         # init attention mask
         self.attentionMask = (self.tokensBuffer != self.config.padTokenID)

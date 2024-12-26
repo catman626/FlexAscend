@@ -17,7 +17,7 @@
                 "--model",
                 "opt-125m"
             ],
-            "justMyCode" :false,
+            // "justMyCode" :false,
             "console": "integratedTerminal"
         }
     ]
