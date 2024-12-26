@@ -71,13 +71,12 @@ class Attention(nn.Cell):
 
         self.attnLayerNorm = nn.LayerNorm(normalized_shape=(hiddenSize, ))
 
-        self.mha = nn.MultiheadAttention(config.hiddenSize, 
-                                          config.numHeads, 
+        self.mha = nn.MultiheadAttention(embed_dim=config.hiddenSize, 
+                                          num_heads=config.numHeads, 
                                           dropout=0, 
                                           has_bias=True, 
                                           batch_first=True,
                                           dtype=dtype.float16)
-
         
         self.residual = ops.Add()
 
@@ -141,6 +140,8 @@ class Attention(nn.Cell):
 
     def construct(self, x, iterNo, attentionMask):
         assert attentionMask is None or len( attentionMask.shape ) == 2
+        assert x.dtype == dtype.float16
+
         if iterNo == 0:
             return self.prefill(x, attentionMask)
         else :
@@ -176,8 +177,8 @@ class TransformerLayer(nn.Cell):
         self.attn = Attention(config=config)
         self.ffn = FeedForward(config=config)
 
-    def construct(self, x, iterNo):
-        attnOut = self.attn(x, iterNo)
+    def construct(self, x, iterNo, attentionMask):
+        attnOut = self.attn(x, iterNo, attentionMask)
         
         ffnOut = self.ffn(attnOut) 
 
@@ -186,7 +187,7 @@ class TransformerLayer(nn.Cell):
 def lazyParameter(shape, name):
     return Parameter(
             initializer(init="normal", shape = shape),
-            name = name
+            name = name,
         )
 
 class InputEmbed(nn.Cell):
@@ -209,7 +210,7 @@ class InputEmbed(nn.Cell):
         
         tokenEmbed = self.gather(self.tokenEmbedWeight, inputIDs, 0)
 
-        posIds = ops.cumsum(attentionMask, axis=1)
+        posIds = ops.cumsum(attentionMask.to(dtype.int32), axis=1)
         
         posEmbed = self.gather(self.posEmbedWeight, posIds, 0)
 
@@ -222,6 +223,8 @@ class InputEmbed(nn.Cell):
         embed = self.add(tokenEmbed, posEmbed)
         
         assert len(embed.shape) == 3
+        # assert embed.dtype == dtype.float16, f"invalid dtype: {embed.dtype}"
+        embed = embed.to(dtype.float16) 
         return embed
 
 class OutputEmbed(nn.Cell):
@@ -248,7 +251,7 @@ class OutputEmbed(nn.Cell):
         return outputIDs
     
 def mhaNameToWeightName(name) :
-    
+    pass    
     
 class OPT(nn.Cell):
     def __init__(self, config:Config):
@@ -290,15 +293,32 @@ class OPT(nn.Cell):
                 unusedWeight.remove(name)
 
         # load mha weight
-        for name, param in tqdm(uninitializedInNet):
-            if name.find("mha") != -1:
-                if (mhaNameToWeightName(name) in unusedWeight) :
-                    param.set_data(weights[mhaNameToWeightName(name)])
-                    unusedWeight.remove(name)
+        eye = np.eye(self.config.hiddenSize, dtype=np.float16)
+        eye3 = np.concatenate([eye, eye, eye], axis=0) 
+        zeros = np.zeros((self.config.hiddenSize,), dtype=np.float16)
+        zeros3 = np.concatenate([zeros, zeros, zeros], axis=0) 
+        
+        for name, param in tqdm(self.parameters_and_names()):
+            if name not in uninitializedInNet:
+                continue
+            if name.find("mha") == -1:
+                continue
             
-                    
+            if name.find("in_proj_weight") != -1:
+                param.set_data(Tensor(eye3)) 
+                uninitializedInNet.remove(name)
 
+            elif name.find("in_proj_bias") != -1:
+                param.set_data(Tensor(zeros3))
+                uninitializedInNet.remove(name)
                 
+            elif name.find("out_proj.weight") != -1:
+                param.set_data(Tensor(eye))
+                uninitializedInNet.remove(name)
+
+            elif name.find("out_proj.bias")  != -1:
+                param.set_data(Tensor(zeros))
+                uninitializedInNet.remove(name)
                 
         print("<<< load weight finish")
         if uninitializedInNet:
@@ -318,15 +338,13 @@ class OPT(nn.Cell):
     def runIter(self, i, currLen):
         B = self.tokensBuffer.shape[0]
 
-        
         # inputEmbed in shape (b, s)
-        inputIDs = self.tokensBuffer[:, :currLen] if i == 0 \
-            else self.tokensBuffer[:, -1:]
+        inputIDs = self.tokensBuffer[:, :currLen]
         
         print(f">>> input mask: {self.attentionMask}")
         h = self.inputEmbed(inputIDs, self.attentionMask)
         for l in self.layers:
-            h = l(h, i) 
+            h = l(h, i, self.attentionMask) 
         # o should be in shape (b, )
         h = h[:, -1:]
         o = self.outputEmbed(h)
@@ -334,7 +352,7 @@ class OPT(nn.Cell):
         
         self.tokensBuffer = ops.concat((self.tokensBuffer, o), axis=1)
         self.attentionMask = ops.concat(
-            (self.attentionMask, Tensor(np.ones(shape=(B,  1), dtype=np.int32)) ), 
+            (self.attentionMask, Tensor(np.ones(shape=(B,  1), dtype=np.bool_)) ), 
             axis=1)
             
     def run(self, inputSentences: list[str]):
@@ -346,14 +364,13 @@ class OPT(nn.Cell):
         maxIter = 16 
         
         # init attention mask
-        self.attentionMask = (self.tokensBuffer != self.config.padTokenID).to(dtype.int32)
+        self.attentionMask = (self.tokensBuffer != self.config.padTokenID)
         assert isinstance(self.attentionMask, Tensor)
         
         print(">>> inference begin")
         for i in range(maxIter):
             print(f"    >>> loop {i} begin")
             self.runIter(i, promptLen+i)
-            
 
         print("<<< inference end")
         outputSentences = []
@@ -375,7 +392,6 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, required=True)
 
     args = parser.parse_args()
-
 
     config = getOptConfig(args.model)
     config.weightFname = args.ckpt
