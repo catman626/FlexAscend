@@ -20,7 +20,7 @@ class Config:
             hiddenSize, inputDim, ffnEmbedDim,
         ):
         self.modelName = name
-        self.dtype = dtype.float16
+        self.dtype = dtype.float32
         self.hasBias = True
         self.maxSeqLen= maxSeqLen
         self.inputLen = inputDim
