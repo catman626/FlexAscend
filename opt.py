@@ -118,6 +118,8 @@ def mha_decode(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int) :
     
     # (b, nh, 1, h1) -> (b, 1, nh, h1) -> (b, 1, h)
     attnOut = ops.permute(attnOut, (0, 2, 1, 3)).flatten(start_dim=2)
+    
+    return attnOut
 
 
 class Attention(nn.Cell):
@@ -159,7 +161,7 @@ class Attention(nn.Cell):
         ids = ops.arange(0, s)
         casualMask = ids <= ids.view(s, 1)
         if attentionMask is not None:
-            mask = casualMask.view(1, s, s) & attentionMask.view(b, 1, s)
+            mask = ops.logical_and(casualMask.view(1, s, s), attentionMask.view(b, 1, s))
         else :
             mask = casualMask.view(1, s, s) 
 
@@ -188,7 +190,7 @@ class Attention(nn.Cell):
         k = self.kCache
         v = self.vCache
 
-        mhaOut = mha_decode(q, k, v, attentionMask)
+        mhaOut = mha_decode(q, k, v, attentionMask, self.numHead)
 
         attnOut = self.outProj(mhaOut)
 
@@ -368,14 +370,13 @@ class OPT(nn.Cell):
         inputIDs = self.tokensBuffer[:, :currLen] if i == 0 \
             else self.tokensBuffer[:, -1:]
         
-        print(f">>> input mask: {self.attentionMask}")
+        # print(f">>> input mask: {self.attentionMask}")
         h = self.inputEmbed(inputIDs, self.attentionMask)
         for l in self.layers:
             h = l(h, i, self.attentionMask) 
         # o should be in shape (b, )
         h = h[:, -1:]
         o = self.outputEmbed(h)
-        print(f">>> o inshape {o.shape}")
         
         self.tokensBuffer = ops.concat((self.tokensBuffer, o), axis=1)
         self.attentionMask = ops.concat(
@@ -420,16 +421,19 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-
     config = getOptConfig(args.model)
     config.weightFname = args.ckpt
     config.tokenizer = args.tokenizer
 
     model = OPT(config)
 
+    # inputs = [
+    #     "The largest cat in the world is",
+    #     "The largest cat in the world is"
+    # ]
     inputs = [
-        "the largest cat in the world is",
-        "the largest cat in the world is"
+        "Pairs is the capital city of",
+        "Pairs is the capital city of",
     ]
 
     outputs = model.run(inputs)
