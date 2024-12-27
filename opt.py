@@ -92,74 +92,6 @@ def getOptConfig(name)->OptConfig:
 
     return config
 
-def mha_prefill(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int):
-    b, s, h = q.shape
-    
-    assert h % numHead == 0
-    headDim = h // numHead 
-
-    scaling = headDim ** -0.5
-    # (b, s, nh, h1)
-    q = q.view(b, s, numHead, headDim) * scaling
-    k = k.view(b, s, numHead, headDim)
-    v = v.view(b, s, numHead, headDim)
-
-    q = ops.permute(q, (0, 2, 1, 3))
-    k = ops.permute(k, (0, 2, 3, 1))
-    v = ops.permute(v, (0, 2, 1, 3))
-
-    # QKT
-    # output shape (b, nh, s, s)
-    score = ops.bmm(q, k)
-
-    # mask
-    assert mask.shape == (b, s, s) 
-    score = ops.where(mask.view(b, 1, s, s), score, -1e4) 
-    score = ops.softmax(score)
-
-    # (b, nh, s, s) * (b, nh, s, h1) -> (b, nh, s, h1)
-    attnOut = ops.bmm(score, v)        
-    
-    # (b, nh, s, h1) -> (b, s, nh, h1) -> (b, s, h)
-    attnOut = ops.permute(attnOut, (0, 2, 1, 3)).flatten(start_dim=2)
-   
-    return attnOut 
-    
-def mha_decode(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int) :
-    assert q.shape[1] == 1
-    b, s, h = k.shape
-    # s include the token generated in this iteration
-
-    assert h % numHead == 0
-    headDim = h // numHead
-
-    scaling = headDim ** -0.5
-
-    # (b, 1, nh, h1)
-    q = q.view(b, 1, numHead, headDim) * scaling
-    k = k.view(b, s, numHead, headDim)
-    v = v.view(b, s, numHead, headDim)
-
-    # (b, 1, nh, h1) -> (b, nh, 1, h1)/(b, nh, h1, s)
-    q = ops.permute(q, (0, 2, 1, 3))
-    k = ops.permute(k, (0, 2, 3, 1))
-    v = ops.permute(v, (0, 2, 1, 3))
-
-    # output shape (b, nh, s, s)
-    score = ops.bmm(q, k)
-
-    # mask
-    assert mask.shape == (b, s)
-    score = ops.where(mask.view(b, 1, 1, s), score, -1e4)
-    score = ops.softmax(score)
-
-    # (b, nh, 1, s) * (b, nh, s, h1) -> (b, nh, 1, h1)
-    attnOut = ops.bmm(score, v)        
-    
-    # (b, nh, 1, h1) -> (b, 1, nh, h1) -> (b, 1, h)
-    attnOut = ops.permute(attnOut, (0, 2, 1, 3)).flatten(start_dim=2)
-    
-    return attnOut
 
 
 class Attention(nn.Cell):
@@ -183,6 +115,77 @@ class Attention(nn.Cell):
         self.softmax = nn.Softmax()
         
         self.residual = ops.Add()
+        
+        self.cpuConcat = ops.Concat(axis=1).set_device("CPU")
+
+    def mha_prefill(self, q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int):
+        b, s, h = q.shape
+        
+        assert h % numHead == 0
+        headDim = h // numHead 
+
+        scaling = headDim ** -0.5
+        # (b, s, nh, h1)
+        q = q.view(b, s, numHead, headDim) * scaling
+        k = k.view(b, s, numHead, headDim)
+        v = v.view(b, s, numHead, headDim)
+
+        q = ops.permute(q, (0, 2, 1, 3))
+        k = ops.permute(k, (0, 2, 3, 1))
+        v = ops.permute(v, (0, 2, 1, 3))
+
+        # QKT
+        # output shape (b, nh, s, s)
+        score = ops.bmm(q, k)
+
+        # mask
+        assert mask.shape == (b, s, s) 
+        score = ops.where(mask.view(b, 1, s, s), score, -1e4) 
+        score = ops.softmax(score)
+
+        # (b, nh, s, s) * (b, nh, s, h1) -> (b, nh, s, h1)
+        attnOut = ops.bmm(score, v)        
+        
+        # (b, nh, s, h1) -> (b, s, nh, h1) -> (b, s, h)
+        attnOut = ops.permute(attnOut, (0, 2, 1, 3)).flatten(start_dim=2)
+    
+        return attnOut 
+        
+    def mha_decode(self, q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int) :
+        assert q.shape[1] == 1
+        b, s, h = k.shape
+        # s include the token generated in this iteration
+
+        assert h % numHead == 0
+        headDim = h // numHead
+
+        scaling = headDim ** -0.5
+
+        # (b, 1, nh, h1)
+        q = q.view(b, 1, numHead, headDim) * scaling
+        k = k.view(b, s, numHead, headDim)
+        v = v.view(b, s, numHead, headDim)
+
+        # (b, 1, nh, h1) -> (b, nh, 1, h1)/(b, nh, h1, s)
+        q = ops.permute(q, (0, 2, 1, 3))
+        k = ops.permute(k, (0, 2, 3, 1))
+        v = ops.permute(v, (0, 2, 1, 3))
+
+        # output shape (b, nh, s, s)
+        score = ops.bmm(q, k)
+
+        # mask
+        assert mask.shape == (b, s)
+        score = ops.where(mask.view(b, 1, 1, s), score, -1e4)
+        score = ops.softmax(score)
+
+        # (b, nh, 1, s) * (b, nh, s, h1) -> (b, nh, 1, h1)
+        attnOut = ops.bmm(score, v)        
+        
+        # (b, nh, 1, h1) -> (b, 1, nh, h1) -> (b, 1, h)
+        attnOut = ops.permute(attnOut, (0, 2, 1, 3)).flatten(start_dim=2)
+        
+        return attnOut
 
     def prefill(self, x, attentionMask):
         """ all in form (b, s, h)  """
@@ -192,8 +195,8 @@ class Attention(nn.Cell):
         # (b, s, h)
         q, k, v = self.qProj(normalX), self.kProj(normalX), self.vProj(normalX)
 
-        self.kCache = k
-        self.vCache = v
+        self.kCache = k.move_to("CPU")
+        self.vCache = v.move_to("CPU")
 
         # construct mask
         ids = ops.arange(0, s)
@@ -203,7 +206,7 @@ class Attention(nn.Cell):
         else :
             mask = casualMask.view(1, s, s) 
 
-        mhaOut = mha_prefill(q, k, v, mask, self.numHead) 
+        mhaOut = self.mha_prefill(q, k, v, mask, self.numHead) 
 
         attnOut = self.outProj(mhaOut)
 
@@ -223,12 +226,14 @@ class Attention(nn.Cell):
         normalX = self.attnLayerNorm(x)
         # (b, s, h)
         q, k, v = self.qProj(normalX), self.kProj(normalX), self.vProj(normalX)
-        self.kCache = ops.concat((self.kCache, k), axis=1)
-        self.vCache = ops.concat((self.vCache, v), axis=1)
-        k = self.kCache
-        v = self.vCache
 
-        mhaOut = mha_decode(q, k, v, attentionMask, self.numHead)
+        self.kCache = self.cpuConcat((self.kCache, k.move_to("CPU")))
+        self.vCache = self.cpuConcat((self.vCache, v.move_to("CPU")))
+
+        k = self.kCache.move_to("Ascend")
+        v = self.vCache.move_to("Ascend")
+
+        mhaOut = self.mha_decode(q, k, v, attentionMask, self.numHead)
 
         attnOut = self.outProj(mhaOut)
 
@@ -284,7 +289,8 @@ class TransformerLayer(nn.Cell):
 def lazyParameter(shape, name):
     return Parameter(
             initializer(init="normal", shape = shape),
-            name = name
+            name = name, 
+            requires_grad=False
         )
 
 class InputEmbed(nn.Cell):
