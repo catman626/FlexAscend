@@ -10,11 +10,11 @@ import os
 from mindspore.numpy import ones
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
+DUMMY_WEIGHT = True
 import argparse
 from tqdm import tqdm
 
-class Config:
+class OptConfig:
     def __init__(self, name,
             maxSeqLen, numHiddenLayer, nHead,
             hiddenSize, inputDim, ffnEmbedDim,
@@ -36,16 +36,56 @@ class Config:
         self.tokenizer = None
         self.padTokenID :int = 1
 
-def getOptConfig(name)->Config:
+def getOptConfig(name)->OptConfig:
     if name == "opt-125m":
-        config = Config(name=name,
+        config = OptConfig(name=name,
             maxSeqLen=2048, numHiddenLayer=12, nHead=12,
             hiddenSize=768, inputDim=768, ffnEmbedDim=768 * 4,
         )
     elif name == "opt-1.3b":
-        config = Config(name=name,
+        config = OptConfig(name=name,
             maxSeqLen=2048, numHiddenLayer=24, nHead=32,
             hiddenSize=2048, inputDim=2048, ffnEmbedDim=2048 * 4,
+        )
+    elif name == "opt-2.7b":
+        config = OptConfig(name=name,
+            maxSeqLen=2048, numHiddenLayer=32, nHead=32,
+            hiddenSize=2560, inputDim=2560, ffnEmbedDim=2560 * 4,
+        )
+    elif name == "opt-6.7b":
+        config = OptConfig(name=name,
+            maxSeqLen=2048, numHiddenLayer=32, nHead=32,
+            hiddenSize=4096, inputDim=4096, ffnEmbedDim=4096 * 4,
+        )
+    elif name == "opt-13b":
+        config = OptConfig(name=name,
+            maxSeqLen=2048, numHiddenLayer=40, nHead=40,
+            hiddenSize=5120, inputDim=5120, ffnEmbedDim=5120 * 4,
+        )
+    elif name == "opt-30b":
+        config = OptConfig(name=name,
+            maxSeqLen=2048, numHiddenLayer=48, nHead=56,
+            hiddenSize=7168, inputDim=7168, ffnEmbedDim=7168 * 4,
+        )
+    elif name == "galactica-30b":
+        config = OptConfig(name=name,
+            maxSeqLen=2048, numHiddenLayer=48, nHead=56,
+            hiddenSize=7168, inputDim=7168, ffnEmbedDim=7168 * 4, vocab_size=50000,
+        )
+    elif name == "opt-66b":
+        config = OptConfig(name=name,
+            maxSeqLen=2048, numHiddenLayer=64, nHead=72,
+            hiddenSize=9216, inputDim=9216, ffnEmbedDim=9216 * 4,
+        )
+    elif name == "opt-175b":
+        config = OptConfig(name=name,
+            maxSeqLen=2048, numHiddenLayer=96, nHead=96,
+            hiddenSize=12288, inputDim=12288, ffnEmbedDim=12288 * 4,
+        )
+    elif name == "opt-175b-stage":
+        config = OptConfig(name=name,
+            maxSeqLen=2048, numHiddenLayer=24, nHead=96,
+            hiddenSize=12288, inputDim=12288, ffnEmbedDim=12288 * 4,
         )
     else :
         raise NotImplementedError(f"unsupported name: {name}")
@@ -123,7 +163,7 @@ def mha_decode(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int) :
 
 
 class Attention(nn.Cell):
-    def __init__(self, config: Config):
+    def __init__(self, config: OptConfig):
         super().__init__()
 
         self.headDim = headDim = config.hiddenSize // config.numHead
@@ -140,9 +180,7 @@ class Attention(nn.Cell):
 
         self.attnLayerNorm = nn.LayerNorm(normalized_shape=(hiddenSize, ))
 
-        self.batchMatMul = ops.BatchMatMul()    # transpose handled in construct:premute
         self.softmax = nn.Softmax()
-        self.batchMatMulSV = ops.BatchMatMul()
         
         self.residual = ops.Add()
 
@@ -208,7 +246,7 @@ class Attention(nn.Cell):
         
 
 class FeedForward(nn.Cell):
-    def __init__(self, config:Config):
+    def __init__(self, config:OptConfig):
         super().__init__()
         hiddenSize = config.hiddenSize
         ffnHiddenSize = config.ffnHiddenSize
@@ -231,7 +269,7 @@ class FeedForward(nn.Cell):
 
 class TransformerLayer(nn.Cell):
     
-    def __init__(self, config:Config):
+    def __init__(self, config:OptConfig):
         super().__init__()
         self.attn = Attention(config=config)
         self.ffn = FeedForward(config=config)
@@ -250,7 +288,7 @@ def lazyParameter(shape, name):
         )
 
 class InputEmbed(nn.Cell):
-    def __init__(self, config:Config):
+    def __init__(self, config:OptConfig):
         super().__init__()
         self.tokenEmbedWeight = lazyParameter(shape=(config.vocabSize, config.hiddenSize), name="embed_tokens.weight")
         self.posEmbedWeight = lazyParameter(shape=(config.maxSeqLen + 2, config.hiddenSize), name="embed_positions.weight")
@@ -285,7 +323,7 @@ class InputEmbed(nn.Cell):
         return embed
 
 class OutputEmbed(nn.Cell):
-    def __init__(self, config:Config):
+    def __init__(self, config:OptConfig):
         super().__init__()
         self.tokenWeight = lazyParameter(shape=(config.vocabSize, config.hiddenSize), name="embed_tokens.weight.ref")
         self.norm = nn.LayerNorm(normalized_shape=(config.hiddenSize, ), 
@@ -309,7 +347,7 @@ class OutputEmbed(nn.Cell):
     
     
 class OPT(nn.Cell):
-    def __init__(self, config:Config):
+    def __init__(self, config:OptConfig):
         super().__init__()
         self.config = config
         self.numLayers = config.numHiddenLayer  
@@ -334,6 +372,9 @@ class OPT(nn.Cell):
         
 
     def loadWeight(self, weightFname):
+        if DUMMY_WEIGHT:
+            print(f">>> dummy weight, weight not loaded")
+            return
         assert isinstance(weightFname, str)
         
         print(">>> load weight begin")
