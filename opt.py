@@ -2,6 +2,10 @@ from transformers import AutoTokenizer
 from mindspore import nn, ops, dtype, Parameter, common, Tensor
 from mindspore.common.initializer import initializer, Zero
 from mindspore import load_checkpoint
+from mindspore import context
+import mindspore as ms
+from timer import timers
+
 import math
 import abc
 import numpy as np
@@ -67,11 +71,6 @@ def getOptConfig(name)->OptConfig:
             maxSeqLen=2048, numHiddenLayer=48, nHead=56,
             hiddenSize=7168, inputDim=7168, ffnEmbedDim=7168 * 4,
         )
-    elif name == "galactica-30b":
-        config = OptConfig(name=name,
-            maxSeqLen=2048, numHiddenLayer=48, nHead=56,
-            hiddenSize=7168, inputDim=7168, ffnEmbedDim=7168 * 4, vocab_size=50000,
-        )
     elif name == "opt-66b":
         config = OptConfig(name=name,
             maxSeqLen=2048, numHiddenLayer=64, nHead=72,
@@ -92,6 +91,19 @@ def getOptConfig(name)->OptConfig:
 
     return config
 
+class FlexTensor:
+    def __init__(self, data:Tensor):
+        self.filename = FlexTensor.allocFilename()
+        self.store(data)
+    
+    def data(self):
+        t = np.load(self.filename)
+        return t
+            
+    def store(self, data:Tensor):
+        np.save(self.filename, data.asnumpy())
+        
+        
 def mha_prefill(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int):
     b, s, h = q.shape
     
@@ -165,8 +177,7 @@ def mha_decode(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int) :
 class Attention(nn.Cell):
     def __init__(self, config: OptConfig):
         super().__init__()
-
-        self.headDim = headDim = config.hiddenSize // config.numHead
+        self.headDim = config.hiddenSize // config.numHead
         self.seqLength = config.maxSeqLen
         hiddenSize = config.hiddenSize
         self.normFactor = math.sqrt(self.headDim)
@@ -466,19 +477,19 @@ if __name__ == "__main__":
     config.weightFname = args.ckpt
     config.tokenizer = args.tokenizer
 
+    context.set_context(device_target="CPU", mode=ms.PYNATIVE_MODE)
     model = OPT(config)
 
-    # inputs = [
-    #     "The largest cat in the world is",
-    #     "The largest cat in the world is"
-    # ]
     inputs = [
         "Pairs is the capital city of",
         "Pairs is the capital city of",
     ]
 
+    timers("model").start()
     outputs = model.run(inputs)
     for s in outputs:
         print(s)
-
+    timers("model").stop()
+    for tName in timers.timers.keys():
+        print(f"timer({tName}): {timers.timers[tName].elapsed('sum')}")
 

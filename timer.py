@@ -39,20 +39,37 @@ class _Timer:
 
         self.startTimes = []
         self.stopTimes = []
+        
+    def elapsed(self, mode:str)->float:
+        assert len(self.startTimes) == len(self.stopTimes)
+        
+        interval = [st - ed for st, ed in zip(self.stopTimes, self.startTimes)]
+        if mode == "sum":
+            return sum(interval)
+        elif mode == "mean":
+            return sum(interval) / len(self.startTimes)
+        else:
+            raise NotImplementedError(f"unrecognized mode in timers elapsed!")
+
 
 class Timers:
     def __init__(self):
-        self.timers = {}
+        self.timers:dict[str, _Timer] = {}
         
-    def __call__(self, name:str):
+    def __call__(self, name:str)->_Timer:
         if name not in self.timers:
             self.timers[name] = _Timer(name)
-
         return self.timers[name]
 
     def __contains__(self, name:str):
         return name in self.timers
 
-timers = Timers()
+    # def display(self):
+    #     for k in self.timers.keys():
+    #         st = self.timers[k].startTimes
+    #         ed = self.timers[k].stopTimes
+    #         elapse
+
+timers :Timers = Timers()
 
 Event = None
