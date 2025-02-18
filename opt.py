@@ -92,18 +92,45 @@ def getOptConfig(name)->OptConfig:
     return config
 
 class FlexTensor:
-    def __init__(self, data:Tensor):
+    weightHome = "weight_cache_home"
+    fileCnt:int = 0
+
+    def __init__(self, shape, data:Tensor = None):
+        assert shape 
         self.filename = FlexTensor.allocFilename()
-        self.store(data)
-    
-    def data(self):
-        t = np.load(self.filename)
-        return t
+        if data is not None:
+            self.store(data)
+            self.init = True
+        else :
+            self.initZeros(shape)
+        
+    def fromMsTensor(self, data:Tensor):
+        self.filename = FlexTensor.allocFilename()
+        
+    def initZeros(self, shape):
+        np.save(self.filename, np.zeros(shape))
+
+    def data(self)->Tensor:
+        npT = np.load(self.filename)
+        msT = Tensor.from_numpy(npT)
+        return msT
             
     def store(self, data:Tensor):
+        self.update(data)
+
+    def update(self, data:Tensor):
         np.save(self.filename, data.asnumpy())
+
+    @staticmethod
+    def allocFilename()->str:
+        if not os.path.exists(FlexTensor.weightHome):
+            os.mkdir(FlexTensor.weightHome)
         
-        
+        alloc = FlexTensor.weightHome + str(FlexTensor.fileCnt)
+        FlexTensor.fileCnt += 1 
+        return alloc
+
+
 def mha_prefill(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int):
     b, s, h = q.shape
     
@@ -183,9 +210,13 @@ class Attention(nn.Cell):
         self.normFactor = math.sqrt(self.headDim)
         self.numHead = config.numHead
         
-        self.qProj = nn.Dense(hiddenSize, hiddenSize)
-        self.kProj = nn.Dense(hiddenSize, hiddenSize)
-        self.vProj = nn.Dense(hiddenSize, hiddenSize)
+        self.qProj = FlexTensor()
+        self.kProj = FlexTensor()
+        self.vProj = FlexTensor()
+
+        self.qBias = FlexTensor()
+        self.kBias = FlexTensor()
+        self.vBias = FlexTensor()
 
         self.outProj = nn.Dense(hiddenSize, hiddenSize)
 
@@ -201,10 +232,13 @@ class Attention(nn.Cell):
 
         normalX = self.attnLayerNorm(x)
         # (b, s, h)
-        q, k, v = self.qProj(normalX), self.kProj(normalX), self.vProj(normalX)
+        
+        q = ops.dense(normalX, self.qProj.data(), self.qBias.data())
+        k = ops.dense(normalX, self.kProj.data(), self.kBias.data())
+        v = ops.dense(normalX, self.vProj.data(), self.vBias.data())
 
-        self.kCache = k
-        self.vCache = v
+        self.kCache = FlexTensor(k)
+        self.vCache = FlexTensor(v)
 
         # construct mask
         ids = ops.arange(0, s)
@@ -214,6 +248,7 @@ class Attention(nn.Cell):
         else :
             mask = casualMask.view(1, s, s) 
 
+        # calculate prefill 
         mhaOut = mha_prefill(q, k, v, mask, self.numHead) 
 
         attnOut = self.outProj(mhaOut)
@@ -234,13 +269,17 @@ class Attention(nn.Cell):
         normalX = self.attnLayerNorm(x)
         # (b, s, h)
         q, k, v = self.qProj(normalX), self.kProj(normalX), self.vProj(normalX)
-        self.kCache = ops.concat((self.kCache, k), axis=1)
-        self.vCache = ops.concat((self.vCache, v), axis=1)
-        k = self.kCache
-        v = self.vCache
+        q = ops.dense(normalX, self.qProj.data(), self.qBias.data())
+        k = ops.dense(normalX, self.kProj.data(), self.kBias.data())
+        v = ops.dense(normalX, self.vProj.data(), self.vBias.data())
 
-        mhaOut = mha_decode(q, k, v, attentionMask, self.numHead)
+        kcache = ops.concat([self.kCache.data(), k], axis=1)
+        vcache = ops.concat([self.vCache.data(), v], axis=1)
+        self.kCache.update(kcache)
+        self.vCache.update(vcache)
 
+        mhaOut = mha_decode(q, kcache, vcache, attentionMask, self.numHead)
+        
         attnOut = self.outProj(mhaOut)
 
         attnOut = self.residual(attnOut, x)
@@ -348,10 +387,8 @@ class OutputEmbed(nn.Cell):
         normalized = self.norm(x)
         
         output = self.matmul(normalized, self.tokenWeight)
-        # print(f">>> before argmax, output[0] is {output[0]}, shape: {output[0].shape}")  # (vocab)
         
         outputIDs = self.argmax(output)
-        # print(f">>> after argmax, output[0] is {outputIDs[0]}, shape: {outputIDs[0].shape}")
         
         assert len(outputIDs.shape) == 2   # output shape: (B, S), element is id
         return outputIDs
@@ -384,7 +421,8 @@ class OPT(nn.Cell):
 
     def loadWeight(self, weightFname):
         if DUMMY_WEIGHT:
-            print(f">>> dummy weight, weight not loaded")
+            print(f">>> dummy weight, weight all zero")
+            self.loadDummyWeight()
             return
         assert isinstance(weightFname, str)
         
@@ -440,17 +478,16 @@ class OPT(nn.Cell):
         inputTokens = self.tokenizer(inputSentences, padding="max_length",  max_length=promptLen).input_ids
         self.tokensBuffer = Tensor(inputTokens, dtype=dtype.int32) 
 
-        maxIter = 16 
         
         # init attention mask
         self.attentionMask = (self.tokensBuffer != self.config.padTokenID)
         assert isinstance(self.attentionMask, Tensor)
         
+        maxIter = 16 
         print(">>> inference begin")
         for i in range(maxIter):
             print(f"    >>> loop {i} begin")
             self.runIter(i, promptLen+i)
-            
 
         print("<<< inference end")
         outputSentences = []
