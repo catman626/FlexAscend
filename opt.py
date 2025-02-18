@@ -98,16 +98,14 @@ class FlexTensor:
     def __init__(self, shape):
         assert shape 
         self.filename = FlexTensor.allocFilename()
-        if data is not None:
-            self.store(data)
-            self.init = True
-        else :
-            self.initZeros(shape)
+        self.initZeros(shape)
         
     def fromMsTensor(self, data:Tensor):
         self.filename = FlexTensor.allocFilename()
+        self.store(data)
         
     def initZeros(self, shape):
+        print(">>> save zeros")
         np.save(self.filename, np.zeros(shape))
 
     def data(self)->Tensor:
@@ -210,15 +208,16 @@ class Attention(nn.Cell):
         self.normFactor = math.sqrt(self.headDim)
         self.numHead = config.numHead
         
-        self.qProj = FlexTensor()
-        self.kProj = FlexTensor()
-        self.vProj = FlexTensor()
+        self.qProj = FlexTensor(shape=(hiddenSize, hiddenSize))
+        self.kProj = FlexTensor(shape=(hiddenSize, hiddenSize))
+        self.vProj = FlexTensor(shape=(hiddenSize, hiddenSize))
 
-        self.qBias = FlexTensor()
-        self.kBias = FlexTensor()
-        self.vBias = FlexTensor()
+        self.qBias = FlexTensor(shape=(hiddenSize,))
+        self.kBias = FlexTensor(shape=(hiddenSize,))
+        self.vBias = FlexTensor(shape=(hiddenSize,))
 
-        self.outProj = nn.Dense(hiddenSize, hiddenSize)
+        self.outProj = FlexTensor(shape=(hiddenSize, hiddenSize))
+        self.outBias = FlexTensor(shape=(hiddenSize,))
 
         self.attnLayerNorm = nn.LayerNorm(normalized_shape=(hiddenSize, ))
 
@@ -251,7 +250,7 @@ class Attention(nn.Cell):
         # calculate prefill 
         mhaOut = mha_prefill(q, k, v, mask, self.numHead) 
 
-        attnOut = self.outProj(mhaOut)
+        attnOut = ops.dense(mhaOut, self.outProj.data(), self.outBias.data())
 
         attnOut = self.residual(attnOut, x)
 
