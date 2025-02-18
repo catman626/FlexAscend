@@ -95,7 +95,7 @@ class FlexTensor:
     weightHome = "weight_cache_home"
     fileCnt:int = 0
 
-    def __init__(self, shape, data:Tensor = None):
+    def __init__(self, shape):
         assert shape 
         self.filename = FlexTensor.allocFilename()
         if data is not None:
@@ -296,22 +296,27 @@ class Attention(nn.Cell):
         
 
 class FeedForward(nn.Cell):
+    # ffn
     def __init__(self, config:OptConfig):
         super().__init__()
         hiddenSize = config.hiddenSize
         ffnHiddenSize = config.ffnHiddenSize
         
         self.layerNorm = nn.LayerNorm(normalized_shape=(hiddenSize, ))
-        self.linear1 = nn.Dense(hiddenSize, ffnHiddenSize)
+
+        self.linear1 = FlexTensor(shape=(ffnHiddenSize, hiddenSize))
+        self.bias1 = FlexTensor(shape=(ffnHiddenSize, ))
+
         self.relu = nn.ReLU()
-        self.linear2 = nn.Dense(ffnHiddenSize, hiddenSize)
+        self.linear2 = FlexTensor(shape=(hiddenSize, ffnHiddenSize))
+        self.bias2 = FlexTensor(shape=(hiddenSize, ))
         self.residual = ops.Add()
 
     def construct(self, x):
         o = self.layerNorm(x)
-        o = self.linear1(o)
+        o = ops.dense(o, self.linear1.data(), self.bias1.data())
         o = self.relu(o)
-        o = self.linear2(o)
+        o = ops.dense(o, self.linear2.data(), self.bias2.data())
         
         ffnOut = self.residual(o, x)
         return ffnOut
