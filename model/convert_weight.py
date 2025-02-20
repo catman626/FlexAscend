@@ -14,16 +14,16 @@ def replaceName(name:str):
     name = name.replace("model.decoder.", "")
     
     if not name.startswith("layers."):
-        name = name.replace("embed_tokens.weight", "inputEmbed.tokenEmbedWeight")
-        name = name.replace("embed_positions.weight", "inputEmbed.posEmbedWeight")
-        name = name.replace("final_layer_norm.weight", "outputEmbed.norm.gamma")
-        name = name.replace("final_layer_norm.bias", "outputEmbed.norm.beta")
+        name = name.replace("embed_tokens.weight", "inputEmbed.tokenWeight")
+        name = name.replace("embed_positions.weight", "inputEmbed.posWeight")
+        name = name.replace("final_layer_norm.weight", "outputEmbed.layernorm.weight")
+        name = name.replace("final_layer_norm.bias", "outputEmbed.layernorm.bias")
         name = name.replace("lm_head.weight", "outputEmbed.tokenWeight")
     else :
-        name = name.replace("self_attn_layer_norm.weight", "attn.attnLayerNorm.gamma")
-        name = name.replace("self_attn_layer_norm.bias",   "attn.attnLayerNorm.beta")
-        name = name.replace("final_layer_norm.weight", "ffn.layerNorm.gamma")
-        name = name.replace("final_layer_norm.bias", "ffn.layerNorm.beta")
+        name = name.replace("self_attn_layer_norm.weight", "attn.layernorm.weight")
+        name = name.replace("self_attn_layer_norm.bias",   "attn.layernorm.bias")
+        name = name.replace("final_layer_norm.weight", "ffn.layernorm.weight")
+        name = name.replace("final_layer_norm.bias", "ffn.layernorm.bias")
 
         name = name.replace("self_attn", "attn")
         name = name.replace("fc", "ffn.linear")
