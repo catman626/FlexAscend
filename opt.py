@@ -324,7 +324,7 @@ class Attention(nn.Cell):
         k = self.kProj(normalX)
         v = self.vProj(normalX)
         
-        print(f:)
+        print(f"\t\t after projection: {q}")
 
         self.kCache = FlexTensor.fromMSTensor(k, self.name+".kcache")
         self.vCache = FlexTensor.fromMSTensor(v, self.name+".vcache")
@@ -339,6 +339,8 @@ class Attention(nn.Cell):
 
         # calculate prefill 
         mhaOut = mha_prefill(q, k, v, mask, self.numHead) 
+        
+        print(f"after mha: {mhaOut}", end="\n\n")
 
         attnOut = self.outProj(mhaOut)
 
