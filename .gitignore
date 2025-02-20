@@ -4,4 +4,4 @@ checkpoint_download
 *.msgpack
 *.ckpt
 *.h5
-
+weight_cache_home/*
