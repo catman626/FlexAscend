@@ -313,12 +313,18 @@ class Attention(nn.Cell):
         """ all in form (b, s, h)  """
         b, s, h = x.shape
 
+
+        print(f"\t\t>>> before layernorm: {x}", end="\n\n")
+        
         normalX = self.layernorm(x)
         # (b, s, h)
+        print(f"\t\t>>> after layernorm: {x}", end="\n\n")
         
         q = self.qProj(normalX)
         k = self.kProj(normalX)
         v = self.vProj(normalX)
+        
+        print(f:)
 
         self.kCache = FlexTensor.fromMSTensor(k, self.name+".kcache")
         self.vCache = FlexTensor.fromMSTensor(v, self.name+".vcache")
@@ -347,7 +353,7 @@ class Attention(nn.Cell):
         attentionMask in shape (b, 1, s)
         """
         b, s, h = x.shape
-        assert s == 1
+        assert s == 1, f"invalid decode BS: {s}"
 
         normalX = self.layernorm(x)
         # (b, s, h)
@@ -414,7 +420,7 @@ def MSZeros(shape:tuple):
     return Tensor(np.zeros(shape=shape, dtype=np.float16))
 
 class TransformerLayer(nn.Cell):
-    # transformerlayer
+    #transformerlayer
     def __init__(self, name:str, config:OptConfig):
         super().__init__()
         self.name = name
@@ -422,9 +428,12 @@ class TransformerLayer(nn.Cell):
         self.ffn = FeedForward(name+".ffn", config=config)
 
     def construct(self, x, iterNo, attentionMask):
+        # print(f"\t\t>>> attention input is: {x}")
         attnOut = self.attn(x, iterNo, attentionMask)
+        # print(f"\t\t>>> attention_output/ffn_input is: {attnOut}", end="\n\n")
         
         ffnOut = self.ffn(attnOut) 
+        # print(f"\t\t>>> ffn_output is: {ffnOut}", end="\n\n")
 
         return ffnOut
 
@@ -475,7 +484,10 @@ class InputEmbed(nn.Cell):
         inputIDLength = inputIDs.shape[1]
         previousIDsLength = currLength - inputIDLength
         posEmbed = posEmbed[:, previousIDsLength:]
-
+        
+        # print(f"        >>> pos embed: {posEmbed}")
+        # print(f"        >>> token embed: {tokenEmbed}")
+        
         assert tokenEmbed.shape == posEmbed.shape
         embed = self.add(tokenEmbed, posEmbed)
         
@@ -581,9 +593,10 @@ class OPT(nn.Cell):
         
         # print(f">>> input mask: {self.attentionMask}")
         h = self.inputEmbed(inputIDs, self.attentionMask)
-        for l in self.layers:
+        for no, l in enumerate(self.layers):
+            print(f"        >>> layer-{no} input is {h}", end="\n\n")
             h = l(h, i, self.attentionMask) 
-            print(f"        >>> activation {h}")
+            # print(f"        >>> activation {h}")
         # o should be in shape (b, )
         h = h[:, -1:]
         print(f"last hidden value is: {h}")
@@ -599,13 +612,12 @@ class OPT(nn.Cell):
         promptLen = max([len(l) for l in inputSentences])
         inputTokens = self.tokenizer(inputSentences, padding="max_length",  max_length=promptLen).input_ids
         self.tokensBuffer = Tensor(inputTokens, dtype=dtype.int32) 
-
         
         # init attention mask
         self.attentionMask = (self.tokensBuffer != self.config.padTokenID)
         assert isinstance(self.attentionMask, Tensor)
         
-        maxIter = 16 
+        maxIter = 2 
         print(">>> inference begin")
         for i in range(maxIter):
             print(f"    >>> loop {i} begin")
