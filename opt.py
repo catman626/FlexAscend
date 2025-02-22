@@ -159,6 +159,20 @@ class Linear:
     def getParameters(self):
         return { self.weight, self.bias }
 
+class Layernorm:
+    def __init__(self, name, normDim:int):
+        self.name = name
+        self.weight = FlexTensor(name+".weight", (normDim, ))
+        self.bias = FlexTensor(name+".bias", (normDim, ))
+        self.normDim = normDim
+
+    def __call__(self, x:Tensor):
+        l = nn.LayerNorm(normalized_shape=(self.normDim, ), gamma_init=self.weight, beta_init=self.bias)
+        return l(x)
+    
+    def getParameters(self):
+        return { self.weight, self.bias }
+
 class Attention(nn.Cell):
     def __init__(self, name, config: Config):
         super().__init__()
@@ -358,11 +372,12 @@ class OutputEmbed(nn.Cell):
                                  gamma_init=lazyParameter(shape=(config.hiddenSize, ), name="output_embed_layer_norm.weight"),
                                  beta_init=lazyParameter(shape=(config.hiddenSize), name="output_embed_layer_norm.bias"), 
                                  dtype=dtype.float32)
+        self.layernorm = Layernorm("output_embed_layer_norm", config.hiddenSize)    
         self.matmul = ops.BatchMatMul(transpose_b=True)
         self.argmax = ops.Argmax()
 
     def getParameters(self):
-        return { self.tokenWeight }
+        return self.layernorm.getParameters().union({self.tokenWeight})
     
     def construct(self, x):
         # assert x.dtype == dtype.float32
