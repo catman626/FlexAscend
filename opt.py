@@ -134,22 +134,27 @@ def mha_decode(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int) :
     return attnOut
 
 class FlexTensor:
-    def __init__(self, name):
+    def __init__(self, name, shape):
+        self.shape = shape
         self.name = name
-        self.data = None
+        self.t = None
     
     def store(self, data:Tensor):
         assert data.dtype == dtype.float32
-        self.data = data
+        self.t = data
+
+    def data(self):
+        assert self.t is not None
+        return self.t
 
 class Linear:
     def __init__(self, name, inputChannel:int, outputChannel:int):
         self.name = name
-        self.weight = FlexTensor(name+".weight")
-        self.bias = FlexTensor(name+".bias")
+        self.weight = FlexTensor(name+".weight", (outputChannel, inputChannel))
+        self.bias = FlexTensor(name+".bias", (outputChannel))
 
     def __call__(self, x:Tensor):
-        return ops.dense(x, self.weight.data, self.bias.data)
+        return ops.dense(x, self.weight.data(), self.bias.data())
 
     def getParameters(self):
         return { self.weight, self.bias }
@@ -304,10 +309,13 @@ class InputEmbed(nn.Cell):
     #inputembed
     def __init__(self, config:Config):
         super().__init__()
-        self.tokenEmbedWeight = lazyParameter(shape=(config.vocabSize, config.hiddenSize), name="embed_tokens.weight")
-        self.posEmbedWeight = lazyParameter(shape=(config.maxSeqLen + 2, config.hiddenSize), name="embed_positions.weight")
+        self.tokenEmbedWeight = FlexTensor(shape=(config.vocabSize, config.hiddenSize), name="inputEmbed.tokenEmbedWeight")
+        self.posEmbedWeight = FlexTensor(shape=(config.maxSeqLen + 2, config.hiddenSize), name="inputEmbed.posEmbedWeight")
         self.gather = ops.operations.Gather()
         self.add = ops.Add()
+
+    def getParameters(self):
+        return { self.tokenEmbedWeight, self.posEmbedWeight }
 
     def construct(self, inputIDs:Tensor, attentionMask:Tensor):
         """
@@ -321,11 +329,11 @@ class InputEmbed(nn.Cell):
         # assert self.tokenEmbedWeight.dtype == dtype.float32
         # assert self.posEmbedWeight.dtype == dtype.float32
 
-        tokenEmbed = self.gather(self.tokenEmbedWeight, inputIDs, 0)
+        tokenEmbed = self.gather(self.tokenEmbedWeight.data(), inputIDs, 0)
 
         posIds = ops.cumsum(attentionMask.to(dtype=dtype.int32), axis=1)
         
-        posEmbed = self.gather(self.posEmbedWeight, posIds, 0)
+        posEmbed = self.gather(self.posEmbedWeight.data(), posIds, 0)
 
         currLength = attentionMask.shape[1]
         inputIDLength = inputIDs.shape[1]
@@ -344,22 +352,25 @@ class OutputEmbed(nn.Cell):
     #outputembed
     def __init__(self, config:Config):
         super().__init__()
-        self.tokenWeight = lazyParameter(shape=(config.vocabSize, config.hiddenSize), name="embed_tokens.weight.ref")
+        self.tokenWeight = FlexTensor(shape=(config.vocabSize, config.hiddenSize), name="outputEmbed.tokenWeight")
+        
         self.norm = nn.LayerNorm(normalized_shape=(config.hiddenSize, ), 
                                  gamma_init=lazyParameter(shape=(config.hiddenSize, ), name="output_embed_layer_norm.weight"),
                                  beta_init=lazyParameter(shape=(config.hiddenSize), name="output_embed_layer_norm.bias"), 
                                  dtype=dtype.float32)
         self.matmul = ops.BatchMatMul(transpose_b=True)
         self.argmax = ops.Argmax()
+
+    def getParameters(self):
+        return { self.tokenWeight }
     
     def construct(self, x):
         # assert x.dtype == dtype.float32
-        self.tokenWeight = self.tokenWeight.to(dtype.float32)
-        assert self.tokenWeight.dtype == dtype.float32, f"invalid dtype: {self.tokenWeight.dtype}"
+        assert self.tokenWeight.data().dtype == dtype.float32, f"invalid dtype: {self.tokenWeight.dtype}"
 
         normalized = self.norm(x)
         
-        output = self.matmul(normalized, self.tokenWeight)
+        output = self.matmul(normalized, self.tokenWeight.data())
         # print(f">>> before argmax, output[0] is {output[0]}, shape: {output[0].shape}")  # (vocab)
         
         outputIDs = self.argmax(output)
@@ -394,10 +405,10 @@ class OPT(nn.Cell):
         self.attentionMask :Tensor = None   # true : valid, false : neglect
 
     def getParameters(self):
-        ret = set()
+        ret = self.inputEmbed.getParameters()
         for l in self.layers:
             ret = ret.union(l.getParameters())
-
+        ret = ret.union(self.outputEmbed.getParameters())
         return ret
         
 
@@ -419,8 +430,9 @@ class OPT(nn.Cell):
         print("<<< load weight finish")
 
         for p in self.getParameters():
-            p.store(weights[p.name].to(dtype.float32))
-            unusedWeight.remove(p.name)
+            if p.name in weights.keys():
+                p.store(weights[p.name].to(dtype.float32))
+                unusedWeight.remove(p.name)
             
         if uninitializedInNet:
             print(">>> uninitialized weight: ")
