@@ -190,8 +190,7 @@ class Attention(nn.Cell):
         self.qProj = Linear(self.name+".qProj", hiddenSize, hiddenSize)
         self.kProj = Linear(self.name+".kProj", hiddenSize, hiddenSize)
         self.vProj = Linear(self.name+".vProj", hiddenSize, hiddenSize)
-
-        self.outProj = nn.Dense(hiddenSize, hiddenSize, dtype=dtype.float32)
+        self.outProj = Linear(self.name+".outProj", hiddenSize, hiddenSize)
 
         self.layernorm = Layernorm(name+".layernorm", normDim=hiddenSize)
 
@@ -206,6 +205,7 @@ class Attention(nn.Cell):
             *self.kProj.getParameters(),
             *self.vProj.getParameters(),
             *self.qProj.getParameters(),
+            *self.outProj.getParameters(),
             *self.layernorm.getParameters()
         }
 
@@ -282,13 +282,18 @@ class FeedForward(nn.Cell):
         ffnHiddenSize = config.ffnHiddenSize
         
         self.layernorm = Layernorm(name+".layernorm", normDim=hiddenSize)
-        self.linear1 = nn.Dense(hiddenSize, ffnHiddenSize, dtype=dtype.float32)
+        self.linear1 = Linear(name+".linear1", hiddenSize, ffnHiddenSize)
         self.relu = nn.ReLU()
-        self.linear2 = nn.Dense(ffnHiddenSize, hiddenSize, dtype=dtype.float32)
+        self.linear2 = Linear(name+".linear2", ffnHiddenSize, hiddenSize)
         self.residual = ops.Add()
 
     def getParameters(self):
-        return self.layernorm.getParameters()
+        return {
+            *self.layernorm.getParameters(),
+            *self.linear1.getParameters(),
+            *self.linear2.getParameters(),
+        }
+            
 
     def construct(self, x):
         assert x.dtype == dtype.float32
@@ -444,28 +449,14 @@ class OPT(nn.Cell):
         
         uninitializedInNet = []
         unusedWeight = set(weights.keys())
-        for name, param in tqdm(self.parameters_and_names()):
-            if name not in weights.keys():
-                uninitializedInNet.append(name)
-            else:
-                param.set_data(weights[name].to(dtype.float32))
-                unusedWeight.remove(name)
-                
 
         for p in self.getParameters():
             if p.name in weights.keys():
                 p.store(weights[p.name].to(dtype.float32))
                 unusedWeight.remove(p.name)
 
-            elif p.name == "outputEmbed.layernorm.weight":
-                p.store(weights["outputEmbed.norm.gamma"].to(dtype.float32))
-                unusedWeight.remove("outputEmbed.norm.gamma")
-            elif p.name == "outputEmbed.layernorm.bias":
-                p.store(weights["outputEmbed.norm.beta"].to(dtype.float32))
-                unusedWeight.remove("outputEmbed.norm.beta")
             else :
-                print(f"uninitialized weight: {p.name}")
-
+                uninitializedInNet.append(p.name)
                 
         print("<<< load weight finish")
             
