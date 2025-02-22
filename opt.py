@@ -140,7 +140,7 @@ class FlexTensor:
         self.t = None
     
     def store(self, data:Tensor):
-        assert data.dtype == dtype.float32
+        assert data.dtype == dtype.float32, f"invalid dtype: {data.dtype}"
         self.t = data
 
     def data(self):
@@ -167,7 +167,10 @@ class Layernorm:
         self.normDim = normDim
 
     def __call__(self, x:Tensor):
-        l = nn.LayerNorm(normalized_shape=(self.normDim, ), gamma_init=self.weight, beta_init=self.bias)
+        l = nn.LayerNorm(normalized_shape=(self.normDim, ), 
+                         gamma_init=self.weight.data(), 
+                         beta_init=self.bias.data())
+        
         return l(x)
     
     def getParameters(self):
@@ -190,7 +193,7 @@ class Attention(nn.Cell):
 
         self.outProj = nn.Dense(hiddenSize, hiddenSize, dtype=dtype.float32)
 
-        self.attnLayerNorm = nn.LayerNorm(normalized_shape=(hiddenSize, ), dtype=dtype.float32)
+        self.layernorm = Layernorm(name+".layernorm", normDim=hiddenSize)
 
         self.batchMatMul = ops.BatchMatMul()    # transpose handled in construct:premute
         self.softmax = nn.Softmax()
@@ -202,7 +205,8 @@ class Attention(nn.Cell):
         return {
             *self.kProj.getParameters(),
             *self.vProj.getParameters(),
-            *self.qProj.getParameters()
+            *self.qProj.getParameters(),
+            *self.layernorm.getParameters()
         }
 
     def prefill(self, x, attentionMask):
@@ -210,7 +214,7 @@ class Attention(nn.Cell):
         assert x.dtype == dtype.float32
         b, s, h = x.shape
 
-        normalX = self.attnLayerNorm(x)
+        normalX = self.layernorm(x)
         # (b, s, h)
         q, k, v = self.qProj(normalX), self.kProj(normalX), self.vProj(normalX)
         assert q.dtype==dtype.float32
@@ -244,7 +248,7 @@ class Attention(nn.Cell):
         b, s, h = x.shape
         assert s == 1
 
-        normalX = self.attnLayerNorm(x)
+        normalX = self.layernorm(x)
         # (b, s, h)
         q, k, v = self.qProj(normalX), self.kProj(normalX), self.vProj(normalX)
         self.kCache = ops.concat((self.kCache, k), axis=1)
@@ -270,20 +274,25 @@ class Attention(nn.Cell):
         
 
 class FeedForward(nn.Cell):
-    def __init__(self, config:Config):
+    #ffn
+    def __init__(self, name:str, config:Config):
         super().__init__()
+        self.name = name
         hiddenSize = config.hiddenSize
         ffnHiddenSize = config.ffnHiddenSize
         
-        self.layerNorm = nn.LayerNorm(normalized_shape=(hiddenSize, ), dtype=dtype.float32)
+        self.layernorm = Layernorm(name+".layernorm", normDim=hiddenSize)
         self.linear1 = nn.Dense(hiddenSize, ffnHiddenSize, dtype=dtype.float32)
         self.relu = nn.ReLU()
         self.linear2 = nn.Dense(ffnHiddenSize, hiddenSize, dtype=dtype.float32)
         self.residual = ops.Add()
 
+    def getParameters(self):
+        return self.layernorm.getParameters()
+
     def construct(self, x):
         assert x.dtype == dtype.float32
-        o = self.layerNorm(x)
+        o = self.layernorm(x)
         o = self.linear1(o)
         o = self.relu(o)
         o = self.linear2(o)
@@ -298,11 +307,11 @@ class TransformerLayer(nn.Cell):
     def __init__(self, name, config:Config):
         super().__init__()
         self.name = name
-        self.attn = Attention(name=self.name+".attn", config=config)
-        self.ffn = FeedForward(config=config)
+        self.attn = Attention(name=name+".attn", config=config)
+        self.ffn = FeedForward(name=name+".ffn", config=config)
 
     def getParameters(self):
-        return self.attn.getParameters()
+        return self.attn.getParameters().union(self.ffn.getParameters())
 
     def construct(self, x:Tensor, iterNo, attentionMask):
         assert x.dtype == dtype.float32  
@@ -323,8 +332,8 @@ class InputEmbed(nn.Cell):
     #inputembed
     def __init__(self, config:Config):
         super().__init__()
-        self.tokenEmbedWeight = FlexTensor(shape=(config.vocabSize, config.hiddenSize), name="inputEmbed.tokenEmbedWeight")
-        self.posEmbedWeight = FlexTensor(shape=(config.maxSeqLen + 2, config.hiddenSize), name="inputEmbed.posEmbedWeight")
+        self.tokenEmbedWeight = FlexTensor(shape=(config.vocabSize, config.hiddenSize), name="inputEmbed.tokenWeight")
+        self.posEmbedWeight = FlexTensor(shape=(config.maxSeqLen + 2, config.hiddenSize), name="inputEmbed.posWeight")
         self.gather = ops.operations.Gather()
         self.add = ops.Add()
 
@@ -368,11 +377,11 @@ class OutputEmbed(nn.Cell):
         super().__init__()
         self.tokenWeight = FlexTensor(shape=(config.vocabSize, config.hiddenSize), name="outputEmbed.tokenWeight")
         
-        self.norm = nn.LayerNorm(normalized_shape=(config.hiddenSize, ), 
-                                 gamma_init=lazyParameter(shape=(config.hiddenSize, ), name="output_embed_layer_norm.weight"),
-                                 beta_init=lazyParameter(shape=(config.hiddenSize), name="output_embed_layer_norm.bias"), 
-                                 dtype=dtype.float32)
-        self.layernorm = Layernorm("output_embed_layer_norm", config.hiddenSize)    
+        # self.norm = nn.LayerNorm(normalized_shape=(config.hiddenSize, ), 
+        #                          gamma_init=lazyParameter(shape=(config.hiddenSize, ), name="output_embed_layer_norm.weight"),
+        #                          beta_init=lazyParameter(shape=(config.hiddenSize), name="output_embed_layer_norm.bias"), 
+        #                          dtype=dtype.float32)
+        self.layernorm = Layernorm("outputEmbed.layernorm", config.hiddenSize)    
         self.matmul = ops.BatchMatMul(transpose_b=True)
         self.argmax = ops.Argmax()
 
@@ -383,7 +392,7 @@ class OutputEmbed(nn.Cell):
         # assert x.dtype == dtype.float32
         assert self.tokenWeight.data().dtype == dtype.float32, f"invalid dtype: {self.tokenWeight.dtype}"
 
-        normalized = self.norm(x)
+        normalized = self.layernorm(x)
         
         output = self.matmul(normalized, self.tokenWeight.data())
         # print(f">>> before argmax, output[0] is {output[0]}, shape: {output[0].shape}")  # (vocab)
@@ -442,12 +451,23 @@ class OPT(nn.Cell):
                 param.set_data(weights[name].to(dtype.float32))
                 unusedWeight.remove(name)
                 
-        print("<<< load weight finish")
 
         for p in self.getParameters():
             if p.name in weights.keys():
                 p.store(weights[p.name].to(dtype.float32))
                 unusedWeight.remove(p.name)
+
+            elif p.name == "outputEmbed.layernorm.weight":
+                p.store(weights["outputEmbed.norm.gamma"].to(dtype.float32))
+                unusedWeight.remove("outputEmbed.norm.gamma")
+            elif p.name == "outputEmbed.layernorm.bias":
+                p.store(weights["outputEmbed.norm.beta"].to(dtype.float32))
+                unusedWeight.remove("outputEmbed.norm.beta")
+            else :
+                print(f"uninitialized weight: {p.name}")
+
+                
+        print("<<< load weight finish")
             
         if uninitializedInNet:
             print(">>> uninitialized weight: ")
