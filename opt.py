@@ -14,6 +14,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import argparse
 from tqdm import tqdm
 
+USING_DISK=True
 
 class Config:
     def __init__(self, name,
@@ -133,19 +134,43 @@ def mha_decode(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int) :
     
     return attnOut
 
+
 class FlexTensor:
+    weightHome = "weightHome"
     def __init__(self, name, shape):
         self.shape = shape
         self.name = name
         self.t = None
-    
+        self.filename = None
+         
     def store(self, data:Tensor):
         assert data.dtype == dtype.float32, f"invalid dtype: {data.dtype}"
-        self.t = data
+
+        if USING_DISK :
+            self.diskStore(data)
+        else :
+            self.t = data
 
     def data(self):
-        assert self.t is not None
-        return self.t
+        if USING_DISK:
+            return self.diskData()
+        else:
+            assert self.t is not None
+            return self.t
+    def diskStore(self, data:Tensor):
+        
+        self.filename = os.path.join(FlexTensor.weightHome, self.name) + ".npy"
+        if not os.path.exists(FlexTensor.weightHome):
+            os.mkdir(FlexTensor.weightHome)
+
+        np.save(self.filename, data.asnumpy())
+    
+    def diskData(self):
+        assert self.filename is not None, f"disk-tensor fetch before store"
+        npT = np.load(self.filename)
+        return Tensor(npT)
+
+    
 
 class Linear:
     def __init__(self, name, inputChannel:int, outputChannel:int):
