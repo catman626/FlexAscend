@@ -16,8 +16,6 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import argparse
 
-USING_DISK=True
-
 class Config:
     def __init__(self, name,
             maxSeqLen, numHiddenLayer, nHead,
@@ -153,6 +151,7 @@ def mha_decode(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int) :
 
 class FlexTensor:
     weightHome = "weightHome"
+    offload = False
     def __init__(self, name, shape):
         self.shape = shape
         self.name = name
@@ -165,13 +164,13 @@ class FlexTensor:
     def store(self, data:Tensor):
         assert data.dtype == dtype.float32, f"invalid dtype: {data.dtype}"
 
-        if USING_DISK :
+        if FlexTensor.offload :
             self.diskStore(data)
         else :
             self.t = data
 
     def data(self):
-        if USING_DISK:
+        if FlexTensor.offload:
             return self.diskData()
         else:
             assert self.t is not None
@@ -599,12 +598,16 @@ if __name__ == "__main__":
     parser.add_argument("--ckpt", nargs="*", help="list all ckpt files")
     parser.add_argument("--tokenizer", type=str, default="/home/ma-user/work/FlexAscend/model/opt-1.3b")
     parser.add_argument("--model", type=str, required=True)
+    parser.add_argument("--offload", action="store_true", help=" apply offload? ")
 
     args = parser.parse_args()
 
     config = getOptConfig(args.model)
     config.weightFname = args.ckpt
     config.tokenizer = args.tokenizer
+
+    if args.offload:
+        FlexTensor.offload = True
 
     timers("load").start()
     print("load model begin")
@@ -629,7 +632,7 @@ if __name__ == "__main__":
     loadTime = timers("load").elapsed()
 
     
-    print(f" >>> USING_DISK: {USING_DISK}")
+    print(f" >>> offload: {args.offload}")
     print(f" >>> load model take time: {loadTime}")
     print(f" >>> inference take time: {inferenceTime}")
     

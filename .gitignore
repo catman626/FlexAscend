@@ -5,3 +5,4 @@ checkpoint_download
 *.ckpt
 *.h5
 weight_cache_home/*
+__pycache__
