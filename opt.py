@@ -14,10 +14,9 @@ from timer import timers
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import argparse
-from tqdm import tqdm
 
-USING_DISK=True
-DUMMY_WEIGHT=TRUE
+USING_DISK=False
+DUMMY_WEIGHT=True
 
 class Config:
     def __init__(self, name,
@@ -55,6 +54,16 @@ def getOptConfig(name)->Config:
         config = Config(name=name,
             maxSeqLen=2048, numHiddenLayer=32, nHead=32,
             hiddenSize=4096, inputDim=4096, ffnEmbedDim=4096 * 4,
+        )
+    elif name == "opt-66b":
+        config = Config(name=name,
+            maxSeqLen=2048, numHiddenLayer=64, nHead=72,
+            hiddenSize=9216, inputDim=9216, ffnEmbedDim=9216 * 4,
+        )
+    elif name == "opt-175b":
+        config = Config(name=name,
+            maxSeqLen=2048, numHiddenLayer=96, nHead=96,
+            hiddenSize=12288, inputDim=12288, ffnEmbedDim=12288 * 4,
         )
     else :
         raise NotImplementedError(f"unsupported name: {name}")
@@ -182,7 +191,6 @@ class FlexTensor:
         assert self.filename is not None, f"disk-tensor fetch before store"
         npT = np.load(self.filename)
         return Tensor(npT)
-
     
 
 class Linear:
@@ -517,11 +525,12 @@ class OPT(nn.Cell):
         print(">>> load weight begin")
         loaded = []
         if isinstance(weightFname, str):
-            self.loadWeightFromFile(weightFname)  
+            ld = self.loadWeightFromFile(weightFname)  
+            loaded.append(ld)
         else:
             for w in weightFname:
                 ld = self.loadWeightFromFile(w)
-                loaded.append(ld)
+                loaded.extend(ld)
                 
         print("<<< load weight finish")
         
@@ -533,6 +542,9 @@ class OPT(nn.Cell):
             
 
         if fail:
+            print(" >>> successfully loaded: ")
+            for l in loaded:
+                print(l)
             exit(1)
                 
 
@@ -562,7 +574,7 @@ class OPT(nn.Cell):
         inputTokens = self.tokenizer(inputSentences, padding="max_length",  max_length=promptLen).input_ids
         self.tokensBuffer = Tensor(inputTokens, dtype=dtype.int32) 
 
-        maxIter = 16 
+        maxIter = 4 
         
         # init attention mask
         self.attentionMask = (self.tokensBuffer != self.config.padTokenID)

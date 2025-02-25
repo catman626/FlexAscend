@@ -40,9 +40,16 @@ def convertFile(torchCkpt, mindsporeCkpt):
 
     while torchWeight:
         torchname, weight =torchWeight.popitem()
+        if torchname == "lm_head.weight":
+            continue
         
         msname = replaceName(torchname)
-        mindsporeWeight.append({ 'name': msname, 'data': torch2ms(weight)})
+        msdata = torch2ms(weight)
+        
+        mindsporeWeight.append({ 'name': msname, 'data': msdata})
+
+        if msname == "inputEmbed.tokenWeight":
+            mindsporeWeight.append({ "name": "outputEmbed.tokenWeight", "data": msdata})
 
         print("\t >>> convert item success")
 
