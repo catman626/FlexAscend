@@ -10,13 +10,13 @@ import os
 from mindspore.numpy import ones
 
 from timer import timers
+from tqdm import tqdm
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import argparse
 
-USING_DISK=False
-DUMMY_WEIGHT=True
+USING_DISK=True
 
 class Config:
     def __init__(self, name,
@@ -487,7 +487,7 @@ class OPT(nn.Cell):
         return ret
         
     def initZeros(self):
-        for p in self.getParameters():
+        for p in tqdm(self.getParameters()):
             p.initZeros()
 
     def loadWeightFromFile(self, weightFname:str):
@@ -514,14 +514,12 @@ class OPT(nn.Cell):
         return loaded
 
     def loadWeight(self, weightFname):
-        assert isinstance(weightFname, (str, list))
-
-        if DUMMY_WEIGHT:
-            print(f" >>> use dummy weight, actual parameter not loaded")
+        if not weightFname:
+            print(f" ckpt not provided")
+            print(f" use dummy weight")
             self.initZeros()
             return
 
-        
         print(">>> load weight begin")
         loaded = []
         if isinstance(weightFname, str):
@@ -540,13 +538,11 @@ class OPT(nn.Cell):
                 print(f" !!! weight not loaded: {p.name}")
                 fail = True
             
-
         if fail:
             print(" >>> successfully loaded: ")
             for l in loaded:
                 print(l)
             exit(1)
-                
 
     def runIter(self, i, currLen):
         B = self.tokensBuffer.shape[0]
@@ -585,7 +581,6 @@ class OPT(nn.Cell):
             print(f"    >>> loop {i} begin")
             self.runIter(i, promptLen+i)
             
-
         print("<<< inference end")
         outputSentences = []
         
@@ -601,7 +596,7 @@ import argparse
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     
-    parser.add_argument("--ckpt", nargs="+", help="list all ckpt files")
+    parser.add_argument("--ckpt", nargs="*", help="list all ckpt files")
     parser.add_argument("--tokenizer", type=str, default="/home/ma-user/work/FlexAscend/model/opt-1.3b")
     parser.add_argument("--model", type=str, required=True)
 
@@ -612,7 +607,9 @@ if __name__ == "__main__":
     config.tokenizer = args.tokenizer
 
     timers("load").start()
+    print("load model begin")
     model = OPT(config)
+    print("load model finish")
     timers("load").stop()
 
     inputs = [
@@ -633,7 +630,6 @@ if __name__ == "__main__":
 
     
     print(f" >>> USING_DISK: {USING_DISK}")
-    print(f" >>> DUMMY_WEIGHT: {DUMMY_WEIGHT}")
     print(f" >>> load model take time: {loadTime}")
     print(f" >>> inference take time: {inferenceTime}")
     
