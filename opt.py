@@ -9,12 +9,15 @@ import os
 
 from mindspore.numpy import ones
 
+from timer import timers
+
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import argparse
 from tqdm import tqdm
 
 USING_DISK=True
+DUMMY_WEIGHT=TRUE
 
 class Config:
     def __init__(self, name,
@@ -47,7 +50,11 @@ def getOptConfig(name)->Config:
     elif name == "opt-1.3b":
         config = Config(name=name,
             maxSeqLen=2048, numHiddenLayer=24, nHead=32,
-            hiddenSize=2048, inputDim=2048, ffnEmbedDim=2048 * 4,
+            hiddenSize=2048, inputDim=2048, ffnEmbedDim=2048 * 4,)
+    elif name == "opt-6.7b":
+        config = Config(name=name,
+            maxSeqLen=2048, numHiddenLayer=32, nHead=32,
+            hiddenSize=4096, inputDim=4096, ffnEmbedDim=4096 * 4,
         )
     else :
         raise NotImplementedError(f"unsupported name: {name}")
@@ -143,6 +150,9 @@ class FlexTensor:
         self.t = None
         self.filename = None
          
+    def initZeros(self):
+        self.diskStore(np.zeros(self.shape, dtype=np.float32))
+         
     def store(self, data:Tensor):
         assert data.dtype == dtype.float32, f"invalid dtype: {data.dtype}"
 
@@ -157,13 +167,16 @@ class FlexTensor:
         else:
             assert self.t is not None
             return self.t
-    def diskStore(self, data:Tensor):
+
+    def diskStore(self, data):
+        if isinstance(data, Tensor):
+            data = data.asnumpy()
         
         self.filename = os.path.join(FlexTensor.weightHome, self.name) + ".npy"
         if not os.path.exists(FlexTensor.weightHome):
             os.mkdir(FlexTensor.weightHome)
 
-        np.save(self.filename, data.asnumpy())
+        np.save(self.filename, data)
     
     def diskData(self):
         assert self.filename is not None, f"disk-tensor fetch before store"
@@ -465,39 +478,63 @@ class OPT(nn.Cell):
         ret = ret.union(self.outputEmbed.getParameters())
         return ret
         
+    def initZeros(self):
+        for p in self.getParameters():
+            p.initZeros()
 
-    def loadWeight(self, weightFname):
-        assert isinstance(weightFname, str)
+    def loadWeightFromFile(self, weightFname:str):
+        # return the weights loaded 
+        # print the weights not used
+        assert isinstance(weightFname, str), f"invalid type: {type(weightFname)}"
         
-        print(">>> load weight begin")
         weights = load_checkpoint(weightFname)
-        
-        uninitializedInNet = []
         unusedWeight = set(weights.keys())
+        loaded = []
 
         for p in self.getParameters():
             if p.name in weights.keys():
                 p.store(weights[p.name].to(dtype.float32))
                 unusedWeight.remove(p.name)
-
-            else :
-                uninitializedInNet.append(p.name)
-                
-        print("<<< load weight finish")
-            
-        if uninitializedInNet:
-            print(">>> uninitialized weight: ")
-            for name in uninitializedInNet:
-                # attention mask in shape (b, s)
-                print(name)
+                loaded.append(p.name)
 
         if unusedWeight:
-            print(">>> unused weight:") 
-            for name in unusedWeight:
-                print(name)
+            print(f" !!! unused weight")
+            for uw in unusedWeight:
+                print(uw)
 
-        if uninitializedInNet:
+
+        return loaded
+
+    def loadWeight(self, weightFname):
+        assert isinstance(weightFname, (str, list))
+
+        if DUMMY_WEIGHT:
+            print(f" >>> use dummy weight, actual parameter not loaded")
+            self.initZeros()
+            return
+
+        
+        print(">>> load weight begin")
+        loaded = []
+        if isinstance(weightFname, str):
+            self.loadWeightFromFile(weightFname)  
+        else:
+            for w in weightFname:
+                ld = self.loadWeightFromFile(w)
+                loaded.append(ld)
+                
+        print("<<< load weight finish")
+        
+        fail = False
+        for p in self.getParameters():
+            if p.name not in loaded:
+                print(f" !!! weight not loaded: {p.name}")
+                fail = True
+            
+
+        if fail:
             exit(1)
+                
 
     def runIter(self, i, currLen):
         B = self.tokensBuffer.shape[0]
@@ -552,7 +589,7 @@ import argparse
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     
-    parser.add_argument("--ckpt", type=str, required=True)
+    parser.add_argument("--ckpt", nargs="+", help="list all ckpt files")
     parser.add_argument("--tokenizer", type=str, default="/home/ma-user/work/FlexAscend/model/opt-1.3b")
     parser.add_argument("--model", type=str, required=True)
 
@@ -562,17 +599,29 @@ if __name__ == "__main__":
     config.weightFname = args.ckpt
     config.tokenizer = args.tokenizer
 
+    timers("load").start()
     model = OPT(config)
+    timers("load").stop()
 
-    # inputs = [
-    #     "The largest cat in the world is",
-    #     "The largest cat in the world is"
-    # ]
     inputs = [
-        "Pairs is the capital city of",
-        "Pairs is the capital city of",
+        "Beijing is the capital city of",
+        "The Capital City of The United States is",
     ]
-
+    
+    timers("model").start()
+    
     outputs = model.run(inputs)
     for s in outputs:
         print(s)
+
+    timers("model").stop()
+
+    inferenceTime = timers("model").elapsed()
+    loadTime = timers("load").elapsed()
+
+    
+    print(f" >>> USING_DISK: {USING_DISK}")
+    print(f" >>> DUMMY_WEIGHT: {DUMMY_WEIGHT}")
+    print(f" >>> load model take time: {loadTime}")
+    print(f" >>> inference take time: {inferenceTime}")
+    

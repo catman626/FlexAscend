@@ -40,7 +40,7 @@ class _Timer:
         self.startTimes = []
         self.stopTimes = []
         
-    def elapsed(self, mode:str)->float:
+    def elapsed(self, mode:str = "sum")->float:
         assert len(self.startTimes) == len(self.stopTimes)
         
         interval = [st - ed for st, ed in zip(self.stopTimes, self.startTimes)]
