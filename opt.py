@@ -15,59 +15,9 @@ from tqdm import tqdm
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import argparse
+import threading
 
-class Config:
-    def __init__(self, name,
-            maxSeqLen, numHiddenLayer, nHead,
-            hiddenSize, inputDim, ffnEmbedDim,
-        ):
-        self.modelName = name
-        self.dtype = dtype.float32
-        self.hasBias = True
-        self.maxSeqLen= maxSeqLen
-        self.inputLen = inputDim
-        self.batchSize = 64
-
-        self.numHiddenLayer = numHiddenLayer
-        self.vocabSize = 50272
-        self.weightFname = None
-        self.localTokenizer = "opt-1.3b"
-        self.numHead= nHead
-        self.hiddenSize=hiddenSize
-        self.ffnHiddenSize = ffnEmbedDim
-        self.tokenizer = None
-        self.padTokenID :int = 1
-
-def getOptConfig(name)->Config:
-    if name == "opt-125m":
-        config = Config(name=name,
-            maxSeqLen=2048, numHiddenLayer=12, nHead=12,
-            hiddenSize=768, inputDim=768, ffnEmbedDim=768 * 4,
-        )
-    elif name == "opt-1.3b":
-        config = Config(name=name,
-            maxSeqLen=2048, numHiddenLayer=24, nHead=32,
-            hiddenSize=2048, inputDim=2048, ffnEmbedDim=2048 * 4,)
-    elif name == "opt-6.7b":
-        config = Config(name=name,
-            maxSeqLen=2048, numHiddenLayer=32, nHead=32,
-            hiddenSize=4096, inputDim=4096, ffnEmbedDim=4096 * 4,
-        )
-    elif name == "opt-66b":
-        config = Config(name=name,
-            maxSeqLen=2048, numHiddenLayer=64, nHead=72,
-            hiddenSize=9216, inputDim=9216, ffnEmbedDim=9216 * 4,
-        )
-    elif name == "opt-175b":
-        config = Config(name=name,
-            maxSeqLen=2048, numHiddenLayer=96, nHead=96,
-            hiddenSize=12288, inputDim=12288, ffnEmbedDim=12288 * 4,
-        )
-    else :
-        raise NotImplementedError(f"unsupported name: {name}")
-
-    return config
-
+from optConfig import OptConfig, getOptConfig
 
 def mha_prefill(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int):
     assert q.dtype == dtype.float32
@@ -157,6 +107,7 @@ class FlexTensor:
         self.name = name
         self.t = None
         self.filename = None
+        self.cached = None
          
     def initZeros(self):
         self.diskStore(np.zeros(self.shape, dtype=np.float32))
@@ -169,6 +120,10 @@ class FlexTensor:
         else :
             self.t = data
 
+    def loadWeight(self):
+        if FlexTensor.offload:
+            self.cached = self.diskData()
+        
     def data(self):
         if FlexTensor.offload:
             return self.diskData()
@@ -188,9 +143,14 @@ class FlexTensor:
     
     def diskData(self):
         assert self.filename is not None, f"disk-tensor fetch before store"
+
+        if self.cached is not None:
+            cached = self.cached
+            self.cached = None
+            return cached 
+             
         npT = np.load(self.filename)
         return Tensor(npT)
-    
 
 class Linear:
     def __init__(self, name, inputChannel:int, outputChannel:int):
@@ -203,6 +163,10 @@ class Linear:
 
     def getParameters(self):
         return { self.weight, self.bias }
+
+    def loadWeight(self):
+        self.weight.loadWeight()
+        self.bias.loadWeight()
 
 class Layernorm:
     def __init__(self, name, normDim:int):
@@ -221,8 +185,12 @@ class Layernorm:
     def getParameters(self):
         return { self.weight, self.bias }
 
+    def loadWeight(self):
+        self.weight.loadWeight()
+        self.bias.loadWeight()
+
 class Attention(nn.Cell):
-    def __init__(self, name, config: Config):
+    def __init__(self, name, config: OptConfig):
         super().__init__()
 
         self.name = name
@@ -254,7 +222,12 @@ class Attention(nn.Cell):
             *self.layernorm.getParameters()
         }
 
+    def loadWeight(self):
+        for l in [ self.qProj, self.kProj, self.vProj, self.outProj, self.layernorm ]:
+            l.loadWeight()
+
     def prefill(self, x, attentionMask):
+
         """ all in form (b, s, h)  """
         assert x.dtype == dtype.float32
         b, s, h = x.shape
@@ -283,7 +256,6 @@ class Attention(nn.Cell):
         attnOut = self.residual(attnOut, x)
 
         return attnOut
-        
     
     def decode(self, x, attentionMask):
         """
@@ -320,7 +292,7 @@ class Attention(nn.Cell):
 
 class FeedForward(nn.Cell):
     #ffn
-    def __init__(self, name:str, config:Config):
+    def __init__(self, name:str, config:OptConfig):
         super().__init__()
         self.name = name
         hiddenSize = config.hiddenSize
@@ -339,6 +311,9 @@ class FeedForward(nn.Cell):
             *self.linear2.getParameters(),
         }
             
+    def loadWeight(self):
+        for l in [ self.layernorm, self.linear1, self.linear2 ]:
+            l.loadWeight()
 
     def construct(self, x):
         assert x.dtype == dtype.float32
@@ -354,7 +329,7 @@ class FeedForward(nn.Cell):
 class TransformerLayer(nn.Cell):
     #transformerlayer
     
-    def __init__(self, name, config:Config):
+    def __init__(self, name, config:OptConfig):
         super().__init__()
         self.name = name
         self.attn = Attention(name=name+".attn", config=config)
@@ -362,6 +337,10 @@ class TransformerLayer(nn.Cell):
 
     def getParameters(self):
         return self.attn.getParameters().union(self.ffn.getParameters())
+
+    def loadWeight(self):
+        self.attn.loadWeight()
+        self.ffn.loadWeight()
 
     def construct(self, x:Tensor, iterNo, attentionMask):
         assert x.dtype == dtype.float32  
@@ -380,7 +359,7 @@ def lazyParameter(shape, name):
 
 class InputEmbed(nn.Cell):
     #inputembed
-    def __init__(self, config:Config):
+    def __init__(self, config:OptConfig):
         super().__init__()
         self.tokenEmbedWeight = FlexTensor(shape=(config.vocabSize, config.hiddenSize), name="inputEmbed.tokenWeight")
         self.posEmbedWeight = FlexTensor(shape=(config.maxSeqLen + 2, config.hiddenSize), name="inputEmbed.posWeight")
@@ -423,7 +402,7 @@ class InputEmbed(nn.Cell):
 
 class OutputEmbed(nn.Cell):
     #outputembed
-    def __init__(self, config:Config):
+    def __init__(self, config:OptConfig):
         super().__init__()
         self.tokenWeight = FlexTensor(shape=(config.vocabSize, config.hiddenSize), name="outputEmbed.tokenWeight")
         
@@ -455,11 +434,13 @@ class OutputEmbed(nn.Cell):
     
     
 class OPT(nn.Cell):
-    def __init__(self, config:Config):
+    prefetch = False
+    def __init__(self, config:OptConfig):
         super().__init__()
         self.config = config
         self.numLayers = config.numHiddenLayer  
         self.tokenizer = AutoTokenizer.from_pretrained(config.tokenizer, padding_side="left") 
+        
         
         layers = nn.SequentialCell()
         self.inputEmbed = InputEmbed(config)
@@ -543,6 +524,27 @@ class OPT(nn.Cell):
                 print(l)
             exit(1)
 
+    def forward(self, h, layerno, iterno):
+        h = self.layers[layerno](h, iterno, self.attentionMask)
+        return h
+        
+    def coreLoop(self, h, iterNo):
+        if OPT.prefetch:
+            self.layers[0].loadWeight()
+            for l in range(len(self.layers)):
+                h = self.layers[l](h, iterNo, self.attentionMask)
+
+                if l+1 < len(self.layers):
+                    self.layers[l+1].loadWeight()
+
+            return h 
+        
+        for l in self.layers:
+            l.loadWeight()
+            h = l(h, iterNo, self.attentionMask) 
+
+        return h
+
     def runIter(self, i, currLen):
         B = self.tokensBuffer.shape[0]
         
@@ -552,9 +554,8 @@ class OPT(nn.Cell):
         
         # print(f">>> input mask: {self.attentionMask}")
         h = self.inputEmbed(inputIDs, self.attentionMask)
-        for l in self.layers:
-            h = l(h, i, self.attentionMask) 
-        # o should be in shape (b, )
+        
+        h = self.coreLoop(h, i)
         
         h = h[:, -1:]
         o = self.outputEmbed(h)
@@ -569,7 +570,7 @@ class OPT(nn.Cell):
         inputTokens = self.tokenizer(inputSentences, padding="max_length",  max_length=promptLen).input_ids
         self.tokensBuffer = Tensor(inputTokens, dtype=dtype.int32) 
 
-        maxIter = 4 
+        maxIter = 16 
         
         # init attention mask
         self.attentionMask = (self.tokensBuffer != self.config.padTokenID)
@@ -599,20 +600,22 @@ if __name__ == "__main__":
     parser.add_argument("--tokenizer", type=str, default="/home/ma-user/work/FlexAscend/model/opt-1.3b")
     parser.add_argument("--model", type=str, required=True)
     parser.add_argument("--offload", action="store_true", help=" apply offload? ")
+    parser.add_argument("--prefetch", action="store_true", help=" apply prefetch ?")
 
     args = parser.parse_args()
 
     config = getOptConfig(args.model)
     config.weightFname = args.ckpt
     config.tokenizer = args.tokenizer
+    
 
     if args.offload:
         FlexTensor.offload = True
+    if args.prefetch:
+        OPT.prefetch = True
 
     timers("load").start()
-    print("load model begin")
     model = OPT(config)
-    print("load model finish")
     timers("load").stop()
 
     inputs = [
