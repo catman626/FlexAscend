@@ -407,10 +407,6 @@ class OutputEmbed(nn.Cell):
         super().__init__()
         self.tokenWeight = FlexTensor(shape=(config.vocabSize, config.hiddenSize), name="outputEmbed.tokenWeight")
         
-        # self.norm = nn.LayerNorm(normalized_shape=(config.hiddenSize, ), 
-        #                          gamma_init=lazyParameter(shape=(config.hiddenSize, ), name="output_embed_layer_norm.weight"),
-        #                          beta_init=lazyParameter(shape=(config.hiddenSize), name="output_embed_layer_norm.bias"), 
-        #                          dtype=dtype.float32)
         self.layernorm = Layernorm("outputEmbed.layernorm", config.hiddenSize)    
         self.matmul = ops.BatchMatMul(transpose_b=True)
         self.argmax = ops.Argmax()
@@ -441,6 +437,7 @@ class OPT(nn.Cell):
         self.config = config
         self.numLayers = config.numHiddenLayer  
         self.tokenizer = AutoTokenizer.from_pretrained(config.tokenizer, padding_side="left") 
+        self.numHiddenLayers = config.numHiddenLayer
         
         
         layers = nn.SequentialCell()
@@ -538,21 +535,23 @@ class OPT(nn.Cell):
         
     def coreLoop(self,  iterNo):
         if OPT.prefetch: 
-            raise NotImplementedError("!!! not implemented") 
-            t1 = threading.Thread(target=self.layers[l].loadWeight)
-            t2 = threading.Thread(target=self.compute, args=(iterNo, l))
+            # raise NotImplementedError("!!! not implemented") 
+            self.loadLayer(0)
+            for l in range(self.numHiddenLayers):
+                t1 = threading.Thread(target=self.loadLayer, args=[l+1])
+                t2 = threading.Thread(target=self.compute, args=[iterNo, l])
+
+                t2.start()
+                t1.start()
+                
+                t1.join()
+                t2.join()
+
+            return 
 
         for l in range(self.config.numHiddenLayer):
-            # self.loadLayer(l)
-            # self.compute(iterNo, l)
-            t1 = threading.Thread(target=self.loadLayer, args=[l])
-            t2 = threading.Thread(target=self.compute, args=[iterNo, l])
-
-            t1.start()
-            t2.start()
-            
-            t1.join()
-            t2.join()
+            self.loadLayer(l)
+            self.compute(iterNo, l)
 
     def singleToken(self, i, currLen):
         B = self.tokensBuffer.shape[0]
