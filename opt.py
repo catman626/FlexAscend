@@ -538,7 +538,7 @@ class OPT(nn.Cell):
             h = self.layers[l](self.hidden[l].val, iterNo, self.attentionMask) 
             self.hidden[l+1].store(h) 
 
-        return h
+        # return h
 
     def singleToken(self, i, currLen):
         B = self.tokensBuffer.shape[0]
@@ -551,9 +551,10 @@ class OPT(nn.Cell):
         # print(f">>> input mask: {self.attentionMask}")
         self.hidden[0].store(self.inputEmbed(inputIDs, self.attentionMask))
         
-        h = self.coreLoop(i)
+        self.coreLoop(i)
+        # h = self.coreLoop(i)
         
-        h = h[:, -1:]
+        h = self.hidden[self.config.numHiddenLayer].val[:, -1:]
         o = self.outputEmbed(h)
         
         self.tokensBuffer = ops.concat((self.tokensBuffer, o), axis=1)
