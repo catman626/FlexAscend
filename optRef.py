@@ -16,7 +16,6 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import argparse
 import threading
-from utils import ValueHolder
 
 from optConfig import OptConfig, getOptConfig
 
@@ -529,29 +528,34 @@ class OPT(nn.Cell):
         h = self.layers[layerno](h, iterno, self.attentionMask)
         return h
         
-    def coreLoop(self,  embed, iterNo):
-        if OPT.prefetch: 
-            raise NotImplementedError("!!!not implemented")
+    def coreLoop(self, h, iterNo):
+        if OPT.prefetch:
+            self.layers[0].loadWeight()
+            for l in range(len(self.layers)):
+                h = self.layers[l](h, iterNo, self.attentionMask)
 
-        for l in range(self.config.numHiddenLayer):
-            self.layers[l].loadWeight()
-            h = self.layers[l](self.hidden[l].val, iterNo, self.attentionMask) 
-            self.hidden[l+1].store(h) 
+                if l+1 < len(self.layers):
+                    self.layers[l+1].loadWeight()
+
+            return h 
+        
+        for l in self.layers:
+            l.loadWeight()
+            h = l(h, iterNo, self.attentionMask) 
 
         return h
 
-    def singleToken(self, i, currLen):
+    def runIter(self, i, currLen):
         B = self.tokensBuffer.shape[0]
-        self.hidden = [ ValueHolder() for _ in range(self.config.numHiddenLayer+1)]
         
         # inputEmbed in shape (b, s)
         inputIDs = self.tokensBuffer[:, :currLen] if i == 0 \
             else self.tokensBuffer[:, -1:]
         
         # print(f">>> input mask: {self.attentionMask}")
-        self.hidden[0].store(self.inputEmbed(inputIDs, self.attentionMask))
+        h = self.inputEmbed(inputIDs, self.attentionMask)
         
-        h = self.coreLoop(self.hidden[0].val, i)
+        h = self.coreLoop(h, i)
         
         h = h[:, -1:]
         o = self.outputEmbed(h)
@@ -570,11 +574,12 @@ class OPT(nn.Cell):
         
         # init attention mask
         self.attentionMask = (self.tokensBuffer != self.config.padTokenID)
+        assert isinstance(self.attentionMask, Tensor)
         
         print(">>> inference begin")
         for i in range(maxIter):
             print(f"    >>> loop {i} begin")
-            self.singleToken(i, promptLen+i)
+            self.runIter(i, promptLen+i)
             
         print("<<< inference end")
         outputSentences = []
