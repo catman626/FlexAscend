@@ -525,20 +525,26 @@ class OPT(nn.Cell):
                 print(l)
             exit(1)
 
-    def forward(self, h, layerno, iterno):
-        h = self.layers[layerno](h, iterno, self.attentionMask)
-        return h
+
+    def compute(self, s, l):
+        h = self.layers[l](self.hidden[l].val, s, self.attentionMask) 
+        self.hidden[l+1].store(h) 
+
+    def loadLayer(self, l):
+        if l < 0 or l >= self.config.numHiddenLayer:
+            return 
+        
+        self.layers[l].loadWeight()
         
     def coreLoop(self,  iterNo):
         if OPT.prefetch: 
-            raise NotImplementedError("!!!not implemented")
+            raise NotImplementedError("!!! not implemented") 
+            t1 = threading.Thread(target=self.layers[l].loadWeight)
+            t2 = threading.Thread(target=self.compute, args=(iterNo, l))
 
         for l in range(self.config.numHiddenLayer):
-            self.layers[l].loadWeight()
-            h = self.layers[l](self.hidden[l].val, iterNo, self.attentionMask) 
-            self.hidden[l+1].store(h) 
-
-        # return h
+            self.loadLayer(l)
+            self.compute(iterNo, l)
 
     def singleToken(self, i, currLen):
         B = self.tokensBuffer.shape[0]
@@ -552,7 +558,6 @@ class OPT(nn.Cell):
         self.hidden[0].store(self.inputEmbed(inputIDs, self.attentionMask))
         
         self.coreLoop(i)
-        # h = self.coreLoop(i)
         
         h = self.hidden[self.config.numHiddenLayer].val[:, -1:]
         o = self.outputEmbed(h)
