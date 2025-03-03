@@ -529,7 +529,7 @@ class OPT(nn.Cell):
         h = self.layers[layerno](h, iterno, self.attentionMask)
         return h
         
-    def coreLoop(self,  embed, iterNo):
+    def coreLoop(self,  iterNo):
         if OPT.prefetch: 
             raise NotImplementedError("!!!not implemented")
 
@@ -551,7 +551,7 @@ class OPT(nn.Cell):
         # print(f">>> input mask: {self.attentionMask}")
         self.hidden[0].store(self.inputEmbed(inputIDs, self.attentionMask))
         
-        h = self.coreLoop(self.hidden[0].val, i)
+        h = self.coreLoop(i)
         
         h = h[:, -1:]
         o = self.outputEmbed(h)
