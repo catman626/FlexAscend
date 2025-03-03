@@ -415,7 +415,6 @@ class OutputEmbed(nn.Cell):
         return self.layernorm.getParameters().union({self.tokenWeight})
     
     def construct(self, x):
-        # assert x.dtype == dtype.float32
         assert self.tokenWeight.data().dtype == dtype.float32, f"invalid dtype: {self.tokenWeight.dtype}"
 
         normalized = self.layernorm(x)
@@ -435,13 +434,14 @@ class OPT(nn.Cell):
     def __init__(self, config:OptConfig):
         super().__init__()
         self.config = config
-        self.numLayers = config.numHiddenLayer  
+        self.numLayers = config.numHiddenLayer  + 2
         self.tokenizer = AutoTokenizer.from_pretrained(config.tokenizer, padding_side="left") 
         self.numHiddenLayers = config.numHiddenLayer
         
-        
         layers = nn.SequentialCell()
         self.inputEmbed = InputEmbed(config)
+        
+        
 
         for i in range(config.numHiddenLayer):
             layers.append(
@@ -451,7 +451,7 @@ class OPT(nn.Cell):
         
         self.layers = layers
         
-        self.loadWeight(config.weightFname)
+        self.loadModel(config.weightFname)
 
         self.tokensBuffer: Tensor = None
         self.maxSeqLen = config.maxSeqLen
@@ -468,7 +468,7 @@ class OPT(nn.Cell):
         for p in tqdm(self.getParameters()):
             p.initZeros()
 
-    def loadWeightFromFile(self, weightFname:str):
+    def loadModelFromFile(self, weightFname:str):
         # return the weights loaded 
         # print the weights not used
         assert isinstance(weightFname, str), f"invalid type: {type(weightFname)}"
@@ -491,7 +491,7 @@ class OPT(nn.Cell):
 
         return loaded
 
-    def loadWeight(self, weightFname):
+    def loadModel(self, weightFname):
         if not weightFname:
             print(f" ckpt not provided")
             print(f" use dummy weight")
@@ -501,11 +501,11 @@ class OPT(nn.Cell):
         print(">>> load weight begin")
         loaded = []
         if isinstance(weightFname, str):
-            ld = self.loadWeightFromFile(weightFname)  
+            ld = self.loadModelFromFile(weightFname)  
             loaded.append(ld)
         else:
             for w in weightFname:
-                ld = self.loadWeightFromFile(w)
+                ld = self.loadModelFromFile(w)
                 loaded.extend(ld)
                 
         print("<<< load weight finish")
