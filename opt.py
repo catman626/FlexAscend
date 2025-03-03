@@ -543,8 +543,16 @@ class OPT(nn.Cell):
             t2 = threading.Thread(target=self.compute, args=(iterNo, l))
 
         for l in range(self.config.numHiddenLayer):
-            self.loadLayer(l)
-            self.compute(iterNo, l)
+            # self.loadLayer(l)
+            # self.compute(iterNo, l)
+            t1 = threading.Thread(target=self.loadLayer, args=[l])
+            t2 = threading.Thread(target=self.compute, args=[iterNo, l])
+
+            t1.start()
+            t2.start()
+            
+            t1.join()
+            t2.join()
 
     def singleToken(self, i, currLen):
         B = self.tokensBuffer.shape[0]
