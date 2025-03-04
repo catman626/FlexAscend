@@ -100,74 +100,107 @@ def mha_decode(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int) :
     return attnOut
 
 
-class FlexTensor:
-    weightHome = "weightHome"
-    offload = False
-    def __init__(self, name, shape):
-        self.shape = shape
-        self.name = name
-        self.t = None
-        self.filename = None
-        self.cached = None
-         
-    def initZeros(self):
-        self.diskStore(np.zeros(self.shape, dtype=np.float32))
-         
+class AscendTensor:
+    def __init__(self):
+        self.val = None
+    
     def store(self, data:Tensor):
-        assert data.dtype == dtype.float32, f"invalid dtype: {data.dtype}"
-
-        if FlexTensor.offload :
-            self.diskStore(data)
-        else :
-            self.t = data
-
-    def loadWeight(self):
-        if FlexTensor.offload:
-            self.cached = self.diskData()
+        self.val = data.move_to("Ascend")
         
     def data(self):
-        if FlexTensor.offload:
-            return self.diskData()
-        else:
-            assert self.t is not None
-            return self.t
+        return self.val
+        
+class CPUTensor:
+    def __init__(self):
+        self.val = None
+        
+    def store(self, data:Tensor):
+        self.val = data.move_to("CPU")
 
-    def diskStore(self, data):
+    def data(self):
+        return self.val
+    
+class DiskTensor:
+    weightHome = "weightHome"
+    def __init__(self, name:str):
+        self.name = name
+        self.filename = None
+        self.cached = None
+        
+    def store(self, data:Tensor):
         if isinstance(data, Tensor):
             data = data.asnumpy()
         
-        self.filename = os.path.join(FlexTensor.weightHome, self.name) + ".npy"
-        if not os.path.exists(FlexTensor.weightHome):
-            os.mkdir(FlexTensor.weightHome)
+        self.filename = os.path.join(DiskTensor.weightHome, self.name) + ".npy"
+        if not os.path.exists(DiskTensor.weightHome):
+            os.mkdir(DiskTensor.weightHome)
 
         np.save(self.filename, data)
-    
-    def diskData(self):
-        assert self.filename is not None, f"disk-tensor fetch before store"
 
-        if self.cached is not None:
+    def load(self):
+        assert self.filename is not None, f"disk-tensor fetch before store"
+             
+        npT = np.load(self.filename)
+        self.cached = Tensor(npT)
+        # self.cached = Tensor(npT).move_to("Ascend")
+
+    def data(self):
+        if self.cached is not None: 
             cached = self.cached
             self.cached = None
             return cached 
-             
-        npT = np.load(self.filename)
-        return Tensor(npT)
+
+        self.load()
+        return self.data()
+        
+class FlexTensor:
+    def __init__(self, name, shape, home:str="DISK"):
+        self.shape = shape
+        self.name = name
+        self.home = home    # where the data is stored, Ascend or CPU, DISK
+        
+        if self.home == "Ascend":
+            self.tensor = AscendTensor()
+        elif self.home == "CPU":
+            self.tensor = CPUTensor()
+        elif self.home == "DISK":
+            self.tensor = DiskTensor(self.name)
+        else:
+            raise NotImplementedError(f"not implemented home: {self.home}")
+
+    def store(self, data:Tensor):
+        assert data.dtype == dtype.float32, f"invalid dtype: {data.dtype}"
+
+        self.tensor.store(data)
+
+    def load(self):
+        self.tensor.load()
+
+    def data(self):
+        return self.tensor.data()
+
+    def initZeros(self):
+        return self.tensor.store(np.zeros(self.shape, dtype=np.float32))
 
 class Linear:
     def __init__(self, name, inputChannel:int, outputChannel:int):
         self.name = name
+        self.inchannel = inputChannel
+        self.outchannel = outputChannel
         self.weight = FlexTensor(name+".weight", (outputChannel, inputChannel))
         self.bias = FlexTensor(name+".bias", (outputChannel))
 
     def __call__(self, x:Tensor):
+        # l = nn.Dense(self.inchannel, self.outchannel, self.weight.data())
+        # return l(x)
         return ops.dense(x, self.weight.data(), self.bias.data())
 
     def getParameters(self):
         return { self.weight, self.bias }
 
     def loadWeight(self):
-        self.weight.loadWeight()
-        self.bias.loadWeight()
+        self.weight.load()
+        self.bias.load()
 
 class Layernorm:
     def __init__(self, name, normDim:int):
@@ -187,8 +220,8 @@ class Layernorm:
         return { self.weight, self.bias }
 
     def loadWeight(self):
-        self.weight.loadWeight()
-        self.bias.loadWeight()
+        self.weight.load()
+        self.bias.load()
 
 class Attention(nn.Cell):
     def __init__(self, name, config: OptConfig):
@@ -241,7 +274,6 @@ class Attention(nn.Cell):
         self.kCache = k
         self.vCache = v
 
-        # construct mask
         ids = ops.arange(0, s)
         casualMask = ids <= ids.view(s, 1)
         if attentionMask is not None:
@@ -282,13 +314,13 @@ class Attention(nn.Cell):
 
         return attnOut
 
-    def construct(self, x, iterNo, attentionMask):
-        assert attentionMask is None or len( attentionMask.shape ) == 2
+    def construct(self, x, iterno, attnMask):
+        assert attnMask is None or len( attnMask.shape ) == 2
 
-        if iterNo == 0:
-            return self.prefill(x, attentionMask)
+        if iterno == 0:
+            return self.prefill(x, attnMask)
         else :
-            return self.decode(x, attentionMask)
+            return self.decode(x, attnMask)
         
 
 class FeedForward(nn.Cell):
@@ -316,7 +348,7 @@ class FeedForward(nn.Cell):
         for l in [ self.layernorm, self.linear1, self.linear2 ]:
             l.loadWeight()
 
-    def construct(self, x):
+    def construct(self, x, iterno, attnMask):
         assert x.dtype == dtype.float32
         o = self.layernorm(x)
         o = self.linear1(o)
@@ -343,11 +375,11 @@ class TransformerLayer(nn.Cell):
         self.attn.loadWeight()
         self.ffn.loadWeight()
 
-    def construct(self, x:Tensor, iterNo, attentionMask):
+    def construct(self, x:Tensor, iterno, attnMask):
         assert x.dtype == dtype.float32  
-        attnOut = self.attn(x, iterNo, attentionMask)
+        attnOut = self.attn(x, iterno, attnMask)
         
-        ffnOut = self.ffn(attnOut) 
+        ffnOut = self.ffn(attnOut, iterno, attnMask) 
 
         assert ffnOut.dtype==dtype.float32
         return ffnOut
@@ -370,7 +402,12 @@ class InputEmbed(nn.Cell):
     def getParameters(self):
         return { self.tokenEmbedWeight, self.posEmbedWeight }
 
-    def construct(self, inputIDs:Tensor, attentionMask:Tensor):
+
+    def loadWeight(self):
+        for l in [ self.tokenEmbedWeight, self.posEmbedWeight ]:
+            l.load()
+
+    def construct(self, inputIDs:Tensor, iterno, attentionMask:Tensor):
         """
         inputIDs : (B, S) / (B, 1)
         each element is an idx
@@ -413,11 +450,22 @@ class OutputEmbed(nn.Cell):
 
     def getParameters(self):
         return self.layernorm.getParameters().union({self.tokenWeight})
-    
-    def construct(self, x):
-        assert self.tokenWeight.data().dtype == dtype.float32, f"invalid dtype: {self.tokenWeight.dtype}"
 
-        normalized = self.layernorm(x)
+    def loadWeight(self):
+        self.tokenWeight.load()
+        self.layernorm.loadWeight()
+    
+    def construct(self, x, iterno, attnMask):
+        """
+        (B, S, H) -> (B, )
+        will take the last token to expect 
+        """
+        assert self.tokenWeight.data().dtype == dtype.float32, f"invalid dtype: {self.tokenWeight.dtype}"
+        assert len(x.shape) == 3
+
+        lastToken = x[:, -1, :]
+
+        normalized = self.layernorm(lastToken)
         
         output = self.matmul(normalized, self.tokenWeight.data())
         # print(f">>> before argmax, output[0] is {output[0]}, shape: {output[0].shape}")  # (vocab)
@@ -425,9 +473,10 @@ class OutputEmbed(nn.Cell):
         outputIDs = self.argmax(output)
         # print(f">>> after argmax, output[0] is {outputIDs[0]}, shape: {outputIDs[0].shape}")
         
-        assert len(outputIDs.shape) == 2   # output shape: (B, S), element is id
+        assert len(outputIDs.shape) == 1   # output shape: (B, S), element is id
         return outputIDs
     
+
     
 class OPT(nn.Cell):
     prefetch = False
@@ -436,19 +485,20 @@ class OPT(nn.Cell):
         self.config = config
         self.numLayers = config.numHiddenLayer  + 2
         self.tokenizer = AutoTokenizer.from_pretrained(config.tokenizer, padding_side="left") 
-        self.numHiddenLayers = config.numHiddenLayer
         
-        layers = nn.SequentialCell()
+        layers = []
         self.inputEmbed = InputEmbed(config)
         
-        
+        layers.append(self.inputEmbed)
 
+        
         for i in range(config.numHiddenLayer):
             layers.append(
                 TransformerLayer(f"layers.{i}", config = config)
             )
         self.outputEmbed = OutputEmbed(config)  
-        
+        layers.append(self.outputEmbed) 
+
         self.layers = layers
         
         self.loadModel(config.weightFname)
@@ -458,10 +508,9 @@ class OPT(nn.Cell):
         self.attentionMask :Tensor = None   # true : valid, false : neglect
 
     def getParameters(self):
-        ret = self.inputEmbed.getParameters()
+        ret = set()
         for l in self.layers:
             ret = ret.union(l.getParameters())
-        ret = ret.union(self.outputEmbed.getParameters())
         return ret
         
     def initZeros(self):
@@ -469,8 +518,6 @@ class OPT(nn.Cell):
             p.initZeros()
 
     def loadModelFromFile(self, weightFname:str):
-        # return the weights loaded 
-        # print the weights not used
         assert isinstance(weightFname, str), f"invalid type: {type(weightFname)}"
         
         weights = load_checkpoint(weightFname)
@@ -488,13 +535,13 @@ class OPT(nn.Cell):
             for uw in unusedWeight:
                 print(uw)
 
-
         return loaded
+
 
     def loadModel(self, weightFname):
         if not weightFname:
-            print(f" ckpt not provided")
-            print(f" use dummy weight")
+            print(f" >>> ckpt not provided")
+            print(f" >>> use dummy weight")
             self.initZeros()
             return
 
@@ -528,7 +575,7 @@ class OPT(nn.Cell):
         self.hidden[l+1].store(h) 
 
     def loadLayer(self, l):
-        if l < 0 or l >= self.config.numHiddenLayer:
+        if l < 0 or l >= self.numLayers:
             return 
         
         self.layers[l].loadWeight()
@@ -537,7 +584,7 @@ class OPT(nn.Cell):
         if OPT.prefetch: 
             # raise NotImplementedError("!!! not implemented") 
             self.loadLayer(0)
-            for l in range(self.numHiddenLayers):
+            for l in range(self.numLayers):
                 t1 = threading.Thread(target=self.loadLayer, args=[l+1])
                 t2 = threading.Thread(target=self.compute, args=[iterNo, l])
 
@@ -549,27 +596,22 @@ class OPT(nn.Cell):
 
             return 
 
-        for l in range(self.config.numHiddenLayer):
+        for l in range(self.numLayers):
             self.loadLayer(l)
             self.compute(iterNo, l)
 
     def singleToken(self, i, currLen):
         B = self.tokensBuffer.shape[0]
-        self.hidden = [ ValueHolder() for _ in range(self.config.numHiddenLayer+1)]
+        self.hidden = [ ValueHolder() for _ in range(self.numLayers+1)]
         
-        # inputEmbed in shape (b, s)
         inputIDs = self.tokensBuffer[:, :currLen] if i == 0 \
             else self.tokensBuffer[:, -1:]
         
-        # print(f">>> input mask: {self.attentionMask}")
-        self.hidden[0].store(self.inputEmbed(inputIDs, self.attentionMask))
+        self.hidden[0].store(inputIDs)
         
         self.coreLoop(i)
         
-        h = self.hidden[self.config.numHiddenLayer].val[:, -1:]
-        o = self.outputEmbed(h)
-        
-        self.tokensBuffer = ops.concat((self.tokensBuffer, o), axis=1)
+        self.tokensBuffer = ops.concat([self.tokensBuffer, self.hidden[-1].val.unsqueeze(1)], axis=1)
         self.attentionMask = ops.concat(
             (self.attentionMask, Tensor(np.ones(shape=(B,  1), dtype=np.bool_)) ), 
             axis=1)
@@ -615,21 +657,24 @@ if __name__ == "__main__":
     config = getOptConfig(args.model)
     config.weightFname = args.ckpt
     config.tokenizer = args.tokenizer
-    
 
     if args.offload:
         FlexTensor.offload = True
     if args.prefetch:
         OPT.prefetch = True
 
+    print("\n " + ">>>"*6 + " inference begin " + "<<<"*6)
+    print(f" >>> settings: ")
+    print(f" >>> model: {args.model}")
+    print(f" >>> prefetch: {OPT.prefetch}")
     timers("load").start()
     model = OPT(config)
     timers("load").stop()
 
+    testBatchSize = 16
     inputs = [
         "Beijing is the capital city of",
-        "The Capital City of The United States is",
-    ]
+    ] * testBatchSize
     
     timers("model").start()
     

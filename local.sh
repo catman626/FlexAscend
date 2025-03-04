@@ -1,5 +1,5 @@
 # python opt.py --ckpt model/opt-125m/mindspore_model.ckpt --tokenizer model/opt-125m --model opt-125m 
-python opt.py --ckpt model/opt-125m/mindspore_model.ckpt --tokenizer model/opt-125m --model opt-125m --offload --prefetch
+python opt.py --ckpt model/opt-125m/mindspore_model.ckpt --tokenizer model/opt-125m --model opt-125m --offload
 
 
 # multiple checkpoint files
@@ -9,5 +9,5 @@ python opt.py --ckpt model/opt-125m/mindspore_model.ckpt --tokenizer model/opt-1
 
 
 
-# python opt.py --tokenizer model/opt-1.3b --model opt-1.3b
+# python opt.py --tokenizer model/opt-1.3b --model opt-125m
 # python opt.py --tokenizer model/opt-1.3b --model opt-175b --offload

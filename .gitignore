@@ -6,3 +6,4 @@ checkpoint_download
 *.h5
 weight_cache_home/*
 __pycache__
+weightHome
