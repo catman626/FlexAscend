@@ -158,7 +158,7 @@ class Attention(nn.Cell):
     #attn
     def __init__(self, name, config: OptConfig):
         super().__init__()
-
+        self.config = config
         self.name = name
         self.headDim = config.hiddenSize // config.numHead
         self.seqLength = config.maxSeqLen
@@ -178,6 +178,7 @@ class Attention(nn.Cell):
         self.batchMatMulSV = ops.BatchMatMul()
         
         self.residual = ops.Add()
+
 
     def getParameters(self):
         return {
@@ -199,12 +200,17 @@ class Attention(nn.Cell):
         b, s, h = x.shape
 
         normalX = self.layernorm(x)
+
         # (b, s, h)
         q, k, v = self.qProj(normalX), self.kProj(normalX), self.vProj(normalX)
         assert q.dtype==dtype.float32
 
-        self.kCache = k
-        self.vCache = v
+        # self.kCache = k
+        # self.vCache = v
+        self.kCache = FlexTensor(self.name+".kcache", (b,self.config.maxSeqLen, h))
+        self.vCache = FlexTensor(self.name+".vcache", (b,self.config.maxSeqLen, h))
+        self.kCache.store(k)
+        self.vCache.store(v)
 
         ids = ops.arange(0, s)
         casualMask = ids <= ids.view(s, 1)
@@ -233,10 +239,12 @@ class Attention(nn.Cell):
         normalX = self.layernorm(x)
         # (b, s, h)
         q, k, v = self.qProj(normalX), self.kProj(normalX), self.vProj(normalX)
-        self.kCache = ops.concat((self.kCache, k), axis=1)
-        self.vCache = ops.concat((self.vCache, v), axis=1)
-        k = self.kCache
-        v = self.vCache
+        kcache = self.kCache.data()
+        vcache = self.vCache.data()
+        k = ops.concat((kcache, k), axis=1)
+        v = ops.concat((vcache, v), axis=1)
+        self.kCache.store(k)
+        self.vCache.store(v)
 
         mhaOut = mha_decode(q, k, v, attentionMask, self.numHead)
 
