@@ -155,6 +155,7 @@ class Layernorm:
         self.bias.load()
 
 class Attention(nn.Cell):
+    #attn
     def __init__(self, name, config: OptConfig):
         super().__init__()
 
@@ -630,5 +631,9 @@ if __name__ == "__main__":
     
     print(f" >>> offload: {args.offload}")
     print(f" >>> load model take time: {prettyTime(loadTime)}s")
+
     print(f" >>> inference take time: {prettyTime(inferenceTime)}")
+
+    
+    
     
