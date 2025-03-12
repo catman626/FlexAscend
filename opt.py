@@ -17,6 +17,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import argparse
 import threading
 from utils import ValueHolder, prettyTime
+from compress import compress, decompress
 
 from optConfig import OptConfig, getOptConfig
 from engine import mha_prefill, mha_decode
@@ -49,21 +50,26 @@ class DiskTensor:
         self.cached = None
         
     def store(self, data:Tensor):
-        if isinstance(data, Tensor):
-            data = data.asnumpy()
         
         self.filename = os.path.join(DiskTensor.weightHome, self.name) + ".npy"
         if not os.path.exists(DiskTensor.weightHome):
             os.mkdir(DiskTensor.weightHome)
 
-        np.save(self.filename, data)
+        self.shape = data.shape
+        data, extra = compress(data)
+        
+        np.save(self.filename, data.asnumpy())
+        np.save(self.filename+".extra", extra.asnumpy())
 
     def load(self):
         assert self.filename is not None, f"disk-tensor fetch before store"
-             
-        npT = np.load(self.filename)
-        self.cached = Tensor(npT)
-        # self.cached = Tensor(npT).move_to("Ascend")
+        t = np.load(self.filename)
+        t = Tensor(t)
+        
+        extra = np.load(self.filename + ".extra.npy") 
+        extra = Tensor(extra)
+
+        self.cached = decompress(t, extra, self.shape)
 
     def data(self):
         if self.cached is not None: 
@@ -612,7 +618,7 @@ if __name__ == "__main__":
     model = OPT(config)
     timers("load").stop()
 
-    testBatchSize = 1024
+    testBatchSize = 256
     inputs = [
         "Beijing is the capital city of",
     ] * testBatchSize
@@ -629,7 +635,7 @@ if __name__ == "__main__":
     loadTime = timers("load").elapsed()
 
     while True:
-        sentence = input()
+        sentence = input(" >>> plase input the question")
         if sentence == "xxx":
             break
         outputs = model.run([sentence])
