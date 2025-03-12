@@ -44,32 +44,41 @@ class CPUTensor:
     
 class DiskTensor:
     weightHome = "weightHome"
+    compress = False
     def __init__(self, name:str):
         self.name = name
         self.filename = None
         self.cached = None
         
     def store(self, data:Tensor):
-        
         self.filename = os.path.join(DiskTensor.weightHome, self.name) + ".npy"
         if not os.path.exists(DiskTensor.weightHome):
             os.mkdir(DiskTensor.weightHome)
 
         self.shape = data.shape
-        data, extra = compress(data)
-        
-        np.save(self.filename, data.asnumpy())
-        np.save(self.filename+".extra", extra.asnumpy())
+
+        if DiskTensor.compress:
+            data, extra = compress(data)
+            
+            np.save(self.filename, data.asnumpy())
+            np.save(self.filename+".extra", extra.asnumpy())
+        else:
+            if isinstance(data, Tensor):
+                data = data.asnumpy()
+            np.save(self.filename, data)
 
     def load(self):
         assert self.filename is not None, f"disk-tensor fetch before store"
         t = np.load(self.filename)
         t = Tensor(t)
         
-        extra = np.load(self.filename + ".extra.npy") 
-        extra = Tensor(extra)
+        if DiskTensor.compress:
+            extra = np.load(self.filename + ".extra.npy") 
+            extra = Tensor(extra)
 
-        self.cached = decompress(t, extra, self.shape)
+            self.cached = decompress(t, extra, self.shape)
+        else:
+            self.cached = t
 
     def data(self):
         if self.cached is not None: 
@@ -97,7 +106,6 @@ class FlexTensor:
 
     def store(self, data:Tensor):
         assert data.dtype == dtype.float32, f"invalid dtype: {data.dtype}"
-
         self.tensor.store(data)
 
     def load(self):
@@ -543,7 +551,7 @@ class OPT(nn.Cell):
             return 
 
         for l in range(self.numLayers):
-            print(f" \t\t\t>>>layer {l}")
+            print(f" \t\t>>>layer {l}")
             self.loadLayer(l)
             self.compute(iterNo, l)
 
@@ -614,11 +622,12 @@ if __name__ == "__main__":
     print(f" >>> settings: ")
     print(f" >>> model: {args.model}")
     print(f" >>> prefetch: {OPT.prefetch}")
+    print(f" >>> offload: {args.offload}")
     timers("load").start()
     model = OPT(config)
     timers("load").stop()
 
-    testBatchSize = 256
+    testBatchSize = 64
     inputs = [
         "Beijing is the capital city of",
     ] * testBatchSize
@@ -635,19 +644,19 @@ if __name__ == "__main__":
     loadTime = timers("load").elapsed()
 
     while True:
-        sentence = input(" >>> plase input the question")
+        sentence = input(" >>> plase input the question\n")
         if sentence == "xxx":
             break
         outputs = model.run([sentence])
         for s in outputs:
             print(s)
 
-    
-    print(f" >>> offload: {args.offload}")
     print(f" >>> load model take time: {prettyTime(loadTime)}s")
-
     print(f" >>> inference take time: {prettyTime(inferenceTime)}")
 
-    
-    
-    
+    with open("default_log", "a+") as f:
+        f.write(f" >>> model: {args.model}\n")
+        f.write(f" >>> prefetch: {OPT.prefetch}\n")
+        f.write(f" >>> offload: {args.offload}\n")
+        f.write(f" >>> load model take time: {prettyTime(loadTime)}s\n")
+        f.write(f" >>> inference take time: {prettyTime(inferenceTime)}\n")
