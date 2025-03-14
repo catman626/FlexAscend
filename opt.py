@@ -606,6 +606,7 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, required=True)
     parser.add_argument("--offload", action="store_true", help=" apply offload? ")
     parser.add_argument("--prefetch", action="store_true", help=" apply prefetch ?")
+    parser.add_argument("--compress", action="store_true")
 
     args = parser.parse_args()
 
@@ -617,6 +618,8 @@ if __name__ == "__main__":
         FlexTensor.offload = True
     if args.prefetch:
         OPT.prefetch = True
+    if args.compress:
+        DiskTensor.compress = True
 
     print("\n " + ">>>"*6 + " inference begin " + "<<<"*6)
     print(f" >>> settings: ")
@@ -632,6 +635,7 @@ if __name__ == "__main__":
         "Beijing is the capital city of",
     ] * testBatchSize
     
+    print(f" >>> batch size: {testBatchSize}")
     timers("model").start()
     
     outputs = model.run(inputs)
@@ -651,12 +655,13 @@ if __name__ == "__main__":
         for s in outputs:
             print(s)
 
-    print(f" >>> load model take time: {prettyTime(loadTime)}s")
+    print(f" >>> load model take time: {prettyTime(loadTime)}")
     print(f" >>> inference take time: {prettyTime(inferenceTime)}")
 
     with open("default_log", "a+") as f:
         f.write(f" >>> model: {args.model}\n")
         f.write(f" >>> prefetch: {OPT.prefetch}\n")
         f.write(f" >>> offload: {args.offload}\n")
-        f.write(f" >>> load model take time: {prettyTime(loadTime)}s\n")
+        f.write(f" >>> batch size: {testBatchSize}")
+        f.write(f" >>> load model take time: {prettyTime(loadTime)}\n")
         f.write(f" >>> inference take time: {prettyTime(inferenceTime)}\n")
