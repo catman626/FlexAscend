@@ -547,7 +547,6 @@ class OPT(nn.Cell):
                 
                 t1.join()
                 t2.join()
-
             return 
 
         for l in range(self.numLayers):
@@ -659,6 +658,7 @@ if __name__ == "__main__":
     print(f" >>> inference take time: {prettyTime(inferenceTime)}")
 
     with open("default_log", "a+") as f:
+        f.write("\n >>>"*6 + "model run" + " <<<" * 6)
         f.write(f" >>> model: {args.model}\n")
         f.write(f" >>> prefetch: {OPT.prefetch}\n")
         f.write(f" >>> offload: {args.offload}\n")
