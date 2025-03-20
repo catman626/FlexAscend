@@ -20,7 +20,6 @@ def lastDimEvenSlice(shape):
     lowerSlice = prefixSlice + (slice(1, lastDim, 2), )
     return upperSlice, lowerSlice
 
-
 def compress(data:Tensor):
     """
     all compress done based on Tensor
@@ -29,12 +28,15 @@ def compress(data:Tensor):
 
     # b, s, h = data.shape
     # assert h % compressConfig.groupSize == 0, f"invalid hidden dim: {h}, not divisable by groupSize: {compressConfig.groupSize}"
+    assert isinstance(data, Tensor)
+
     prefixShape = data.shape[:-1]
     h = data.shape[-1]
     nGroup = h // compressConfig.groupSize
     newShape = prefixShape + (nGroup, compressConfig.groupSize)
 
-    data = data.view(newShape)
+    # print(f"new shape is: {newShape}")
+    data = data.reshape(newShape)  # eg. (b, s, ng, g) ->  (b, s, h)
 
     mx = ops.max(data, axis=-1, keepdims=True)[0]
     mn = ops.min(data, axis=-1, keepdims=True)[0]

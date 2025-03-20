@@ -51,6 +51,7 @@ class DiskTensor:
         self.cached = None
         
     def store(self, data:Tensor):
+        assert isinstance(data, Tensor)
         self.filename = os.path.join(DiskTensor.weightHome, self.name) + ".npy"
         if not os.path.exists(DiskTensor.weightHome):
             os.mkdir(DiskTensor.weightHome)
@@ -115,7 +116,7 @@ class FlexTensor:
         return self.tensor.data()
 
     def initZeros(self):
-        return self.tensor.store(np.zeros(self.shape, dtype=np.float32))
+        return self.tensor.store(Tensor(np.zeros(self.shape, dtype=np.float32)))
 
 class Linear:
     def __init__(self, name, inputChannel:int, outputChannel:int):
@@ -550,7 +551,7 @@ class OPT(nn.Cell):
             return 
 
         for l in range(self.numLayers):
-            print(f" \t\t>>>layer {l}")
+            # print(f" \t\t>>>layer {l}")
             self.loadLayer(l)
             self.compute(iterNo, l)
 
@@ -603,9 +604,10 @@ if __name__ == "__main__":
     parser.add_argument("--ckpt", nargs="*", help="list all ckpt files")
     parser.add_argument("--tokenizer", type=str, default="/home/ma-user/work/FlexAscend/model/opt-1.3b")
     parser.add_argument("--model", type=str, required=True)
-    parser.add_argument("--offload", action="store_true", help=" apply offload? ")
-    parser.add_argument("--prefetch", action="store_true", help=" apply prefetch ?")
+    parser.add_argument("--offload", action="store_true")
+    parser.add_argument("--prefetch", action="store_true")
     parser.add_argument("--compress", action="store_true")
+    parser.add_argument("--interact", action="store_true")
 
     args = parser.parse_args()
 
@@ -646,22 +648,24 @@ if __name__ == "__main__":
     inferenceTime = timers("model").elapsed()
     loadTime = timers("load").elapsed()
 
-    while True:
-        sentence = input(" >>> plase input the question\n")
-        if sentence == "xxx":
-            break
-        outputs = model.run([sentence])
-        for s in outputs:
-            print(s)
+    if args.interact:
+        while True:
+            sentence = input(" >>> plase input the question\n")
+            if sentence == "xxx":
+                break
+            outputs = model.run([sentence])
+            for s in outputs:
+                print(s)
 
     print(f" >>> load model take time: {prettyTime(loadTime)}")
     print(f" >>> inference take time: {prettyTime(inferenceTime)}")
 
     with open("default_log", "a+") as f:
-        f.write("\n >>>"*6 + "model run" + " <<<" * 6)
+        f.write(f"\n {'>>>'*6} model run {'<<<' * 6}")
         f.write(f" >>> model: {args.model}\n")
         f.write(f" >>> prefetch: {OPT.prefetch}\n")
         f.write(f" >>> offload: {args.offload}\n")
         f.write(f" >>> batch size: {testBatchSize}")
+        f.write(f" >>> compress: {args.compress}")
         f.write(f" >>> load model take time: {prettyTime(loadTime)}\n")
         f.write(f" >>> inference take time: {prettyTime(inferenceTime)}\n")
