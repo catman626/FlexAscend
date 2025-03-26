@@ -60,6 +60,5 @@ def integerType(t):
         torch.int8, 
         torch.int16,
         torch.int32,
-        torch.int64,
-        torch.int128,
+        torch.int64
     }

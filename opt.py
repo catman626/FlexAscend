@@ -32,7 +32,7 @@ class Linear:
         self.bias   : FlexTensor = FlexTensor(name+".bias", (outputChannel))
 
     def __call__(self, x:FlexTensor):
-        return F.linear(x, self.weight, self.bias)
+        return F.linear(x, self.weight.data(), self.bias.data())
 
     def getParameters(self):
         return { self.weight, self.bias }
@@ -48,11 +48,11 @@ class Layernorm:
         self.bias   = FlexTensor(name+".bias", (normDim, ))
         self.normDim = normDim
 
-    def __call__(self, x:FlexTensor):
-        l = F.layer_norm(normalized_shape=(self.normDim, ), 
-                         weight=self.weight, 
-                         bias=self.bias)
-        return l(x)
+    def __call__(self, x:Tensor):
+        return F.layer_norm(input=x, 
+                         normalized_shape=(self.normDim, ), 
+                         weight=self.weight.data(), 
+                         bias=self.bias.data())
     
     def getParameters(self):
         return { self.weight, self.bias }
@@ -123,7 +123,7 @@ class Attention:
         b, s, h = x.shape
         assert s == 1
 
-        normalX = F.layer_norm(x)
+        normalX = self.layernorm(x)
     # (b, s, h)
         q, k, v = self.qProj(normalX), self.kProj(normalX), self.vProj(normalX)
         kcache = self.kCache.data()
@@ -235,7 +235,7 @@ class InputEmbed:
         assert len(inputIDs.shape) == 2
         assert isinstance(inputIDs, Tensor)
         assert isinstance(attentionMask, Tensor)
-        assert integerType(inputIDs.dtype)
+        assert integerType(inputIDs.dtype), f"embedding input not integer: {inputIDs.dtype}"
 
         tokenEmbed = F.embedding( inputIDs, self.tokenEmbedWeight.data() ,0)
 
@@ -249,7 +249,7 @@ class InputEmbed:
         posEmbed = posEmbed[:, previousIDsLength:]
 
         assert tokenEmbed.shape == posEmbed.shape
-        embed = self.add(tokenEmbed, posEmbed)
+        embed = tokenEmbed + posEmbed
         
         assert len(embed.shape) == 3
         return embed
@@ -279,13 +279,16 @@ class OutputEmbed:
 
         normalized = self.layernorm(lastToken)
         
-        output = torch.bmm(normalized, self.tokenWeight, transposeB=True)
-        # print(f">>> before argmax, output[0] is {output[0]}, shape: {output[0].shape}")  # (vocab)
+        output = F.linear(normalized, self.tokenWeight.data())
         
-        outputIDs = torch.argmax(output)
+        # print(f">>> before argmax, output[0] is {output[0]}, shape: {output[0].shape}")  # (vocab)
+
+        
+        outputIDs = torch.argmax(output, dim=-1)
         # print(f">>> after argmax, output[0] is {outputIDs[0]}, shape: {outputIDs[0].shape}")
         
         assert len(outputIDs.shape) == 1   # output shape: (B, S), element is id
+        assert integerType(outputIDs.dtype)
         return outputIDs
     
 class OPT:
@@ -423,20 +426,18 @@ class OPT:
         
         self.tokensBuffer = torch.concat([self.tokensBuffer, self.hidden[-1].val.unsqueeze(1)], axis=1)
         self.attentionMask = torch.concat(
-            [self.attentionMask, torch.ones((B,  1)) ], dim=1)
+            [self.attentionMask, torch.ones((B,  1), dtype=torch.bool) ], dim=1)
             
-    def run(self, inputSentences: list[str]):
+    def run(self, inputSentences: list[str], numIter):
         promptLen = max([len(l) for l in inputSentences])
         inputTokens = self.tokenizer(inputSentences, padding="max_length",  max_length=promptLen).input_ids
-        self.tokensBuffer = Tensor(inputTokens) 
+        self.tokensBuffer = Tensor(inputTokens).to(torch.int32) 
 
-        maxIter = 20 
-        
         # init attention mask
         self.attentionMask = (self.tokensBuffer != self.config.padTokenID)
         
         print(">>> inference begin")
-        for i in range(maxIter):
+        for i in range(numIter):
             print(f"    >>> loop {i} begin")
             self.singleToken(i, promptLen+i)
             
@@ -486,6 +487,7 @@ if __name__ == "__main__":
     timers("load").stop()
 
     testBatchSize = 64
+    numIter = 20
     inputs = [
         "Beijing is the capital city of",
     ] * testBatchSize
@@ -493,7 +495,7 @@ if __name__ == "__main__":
     print(f" >>> batch size: {testBatchSize}")
     timers("model").start()
     
-    outputs = model.run(inputs)
+    outputs = model.run(inputs, numIter)
     for s in outputs:
         print(s)
 
@@ -523,3 +525,4 @@ if __name__ == "__main__":
         f.write(f" >>> compress: {args.compress}")
         f.write(f" >>> load model take time: {prettyTime(loadTime)}\n")
         f.write(f" >>> inference take time: {prettyTime(inferenceTime)}\n")
+        f.write(f" >>> per-token: {prettyTime(inferenceTime / testBatchSize / numIter)}\n")

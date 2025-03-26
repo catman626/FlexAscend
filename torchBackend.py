@@ -90,7 +90,6 @@ class FlexTensor:
             raise NotImplementedError(f"not implemented home: {self.home}")
 
     def store(self, data:Tensor):
-        assert data.dtype == dtype.float32, f"invalid dtype: {data.dtype}"
         self.tensor.store(data)
 
     def load(self):
@@ -126,7 +125,7 @@ def sqrt(x):
     return x ** -0.5
 
 def makeMask(attentionMask:Tensor, s:int):
-
+    b = attentionMask.shape[0]
     ids = arange(0, s)
     casualMask = ids <= ids.view(s, 1)
     if attentionMask is not None:
@@ -149,27 +148,27 @@ def mha_prefill(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int):
     k = k.view(b, s, numHead, headDim)
     v = v.view(b, s, numHead, headDim)
 
-    q = q.permute(0, 2, 1, 3)
-    k = k.permute(0, 2, 3, 1)
-    v = v.permute(0, 2, 1, 3)
+    q = q.permute(0, 2, 1, 3).reshape(b*numHead, s, headDim)
+    k = k.permute(0, 2, 3, 1).reshape(b*numHead, headDim, s)
+    v = v.permute(0, 2, 1, 3).reshape(b*numHead, s, headDim)
 
     # QKT
-    # output shape (b, nh, s, s)
+    # output shape (b*nh, s, s)
     score = torch.bmm(q, k)
 
     # mask
     assert mask.shape == (b, s, s) 
-    score = torch.where(mask.view(b, 1, s, s), score, -1e4) 
-    score = F.softmax(score)
+    score = score.view(b, numHead, s, s)
+    score = torch.where(mask.view(b, 1, s, s), score.view(b, numHead, s, s), -1e4) 
+    score = score.view(b*numHead, s, s)
+    score = F.softmax(score, dim=-1)
 
-    # (b, nh, s, s) * (b, nh, s, h1) -> (b, nh, s, h1)
+    # (b*nh, s, s) * (b*nh, s, h1) -> (b*nh, s, h1)
     attnOut = torch.bmm(score, v)        
     
     # (b, nh, s, h1) -> (b, s, nh, h1) -> (b, s, h)
-    attnOut = attnOut.permute(0, 2, 1, 3).flatten(start_dim=2)
-   
+    attnOut = attnOut.view(b, numHead, s, headDim).permute(0, 2, 1, 3).flatten(start_dim=2)
 
-    assert attnOut.dtype == dtype.float32
     return attnOut 
     
 def mha_decode(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int) :
@@ -187,24 +186,26 @@ def mha_decode(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int) :
     k = k.view(b, s, numHead, headDim)
     v = v.view(b, s, numHead, headDim)
 
-    # (b, 1, nh, h1) -> (b, nh, 1, h1)/(b, nh, h1, s)
-    q = q.permute(0, 2, 1, 3)
-    k = k.permute(0, 2, 3, 1)
-    v = v.permute(0, 2, 1, 3)
+    # (b, 1, nh, h1) -> (b, nh, 1, h1)/(b, nh, h1, s) -> flatten dim0,1 
+    q = q.permute(0, 2, 1, 3).reshape(b*numHead, 1, headDim)
+    k = k.permute(0, 2, 3, 1).reshape(b*numHead, headDim, s)
+    v = v.permute(0, 2, 1, 3).reshape(b*numHead, s, headDim)
 
-    # output shape (b, nh, s, s)
+    # output shape (b*nh, 1, s)
     score = torch.bmm(q, k)
 
     # mask
     assert mask.shape == (b, s)
+    
+    score = score.view(b, numHead ,1, s)
     score = torch.where(mask.view(b, 1, 1, s), score, -1e4)
-    score = torch.softmax(score)
+    score = score.view(b*numHead, 1, s)
+    score = torch.softmax(score, dim=-1)
 
-    # (b, nh, 1, s) * (b, nh, s, h1) -> (b, nh, 1, h1)
+    # (b*nh, 1, s) * (b*nh, s, h1) -> (b*nh, 1, h1)
     attnOut = torch.bmm(score, v)        
     
-    # (b, nh, 1, h1) -> (b, 1, nh, h1) -> (b, 1, h)
-    attnOut = attnOut.permute(0, 2, 1, 3).flatten(start_dim=2)
+    # (b*nh, 1, h1) -> (b, 1, nh, h1) -> (b, 1, h)
+    attnOut = attnOut.view(b, numHead, 1, headDim).permute(0, 2, 1, 3).flatten(start_dim=2)
     
     return attnOut
-
