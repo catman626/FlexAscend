@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch.nn.functional import linear
 import numpy as np
 import os
-from compress import compress
+from compress import compress, decompress
 
 
 class AscendTensor:
@@ -48,21 +48,18 @@ class DiskTensor:
         if DiskTensor.compress:
             data, extra = compress(data)
             
-            torch.save(self.filename, data.asnumpy())
-            np.save(self.filename+".extra", extra.asnumpy())
+            torch.save(data, self.filename)
+            torch.save(extra, self.filename+".extra")
         else:
-            if isinstance(data, Tensor):
-                data = data.asnumpy()
-            np.save(self.filename, data)
+            torch.save(data, self.filename)
 
     def load(self):
         assert self.filename is not None, f"disk-tensor fetch before store"
-        t = np.load(self.filename)
+        t = torch.load(self.filename)
         t = Tensor(t)
         
         if DiskTensor.compress:
-            extra = np.load(self.filename + ".extra.npy") 
-            extra = Tensor(extra)
+            extra = torch.load(self.filename + ".extra.npy") 
 
             self.cached = decompress(t, extra, self.shape)
         else:
@@ -78,7 +75,7 @@ class DiskTensor:
         return self.data()
         
 class FlexTensor:
-    def __init__(self, name, shape, home:str="DISK"):
+    def __init__(self, name, shape=None, home:str="DISK"):
         self.shape = shape
         self.name = name
         self.home = home    # where the data is stored, Ascend or CPU, DISK
@@ -128,7 +125,7 @@ def argmax(x:FlexTensor):
 def sqrt(x):
     return x ** -0.5
 
-def makeMask(attentionMask, s):
+def makeMask(attentionMask:Tensor, s:int):
 
     ids = arange(0, s)
     casualMask = ids <= ids.view(s, 1)
@@ -139,26 +136,6 @@ def makeMask(attentionMask, s):
 
     return mask
 
-def prefill(x, qProj, kProj, vProj, outProj, attentionMask, numHead, kCache, vCache):
-
-    b, s, h = x.shape
-
-    # (b, s, h)
-    q, k, v = qProj(x), kProj(x), vProj(x)
-
-    kCache.store(k)
-    vCache.store(v)
-
-    # make a casual mask and combine it with attention mask
-    mask = makeMask(attentionMask, s)
-
-    mhaOut = mha_prefill(q, k, v, mask, numHead) 
-
-    attnOut = outProj(mhaOut)
-
-    attnOut = torch.add(attnOut, x)
-
-    return attnOut
 
 def mha_prefill(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int):
     b, s, h = q.shape
@@ -221,7 +198,7 @@ def mha_decode(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int) :
     # mask
     assert mask.shape == (b, s)
     score = torch.where(mask.view(b, 1, 1, s), score, -1e4)
-    score = softmax(score)
+    score = torch.softmax(score)
 
     # (b, nh, 1, s) * (b, nh, s, h1) -> (b, nh, 1, h1)
     attnOut = torch.bmm(score, v)        
@@ -231,27 +208,3 @@ def mha_decode(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int) :
     
     return attnOut
 
-def gather(weight, idx, padding):
-    return F.embedding(idx, weight, padding)
-
-def decode(x, qProj, kProj, vProj, outProj, kCache, vCache, attentionMask, numHead):
-    b, s, h = x.shape
-    assert s == 1
-
-    normalX = F.layer_norm(x)
-    # (b, s, h)
-    q, k, v = qProj(normalX), kProj(normalX), vProj(normalX)
-    kcache = kCache.data()
-    vcache = vCache.data()
-    k = concat((kcache, k), axis=1)
-    v = concat((vcache, v), axis=1)
-    kCache.store(k)
-    vCache.store(v)
-
-    mhaOut = mha_decode(q, k, v, attentionMask, numHead)
-
-    attnOut = outProj(mhaOut)
-
-    attnOut = attnOut + x
-
-    return attnOut

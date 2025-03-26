@@ -10,9 +10,6 @@ def minTensor(t, dim, keepdim=False):
 def maxTensor(t, dim, keepdim=False):
     return msMax(t, axis=dim, keepdims=keepdim)
 
-def toNumpy(a):
-    return a.asnumpy()
-
 
 # from torch import Tensor,  uint8
 # import torch

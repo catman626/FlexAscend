@@ -1,3 +1,5 @@
+import torch
+
 class ValueHolder:
     def __init__(self):
         self.val = None
@@ -52,3 +54,12 @@ def prettyTime(seconds):
 # Example usage
 # time_in_seconds = 3665  # 1 hour, 1 minute, and 5 seconds
 # print(human_friendly_time(time_in_seconds))
+
+def integerType(t):
+    return t in {
+        torch.int8, 
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.int128,
+    }
