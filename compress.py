@@ -1,5 +1,34 @@
-from mindspore import ops, dtype, Tensor, save_checkpoint
-from mindspore.numpy import average
+from mindspore import Tensor, dtype
+from mindspore.ops import min as msMin
+from mindspore.ops import max as msMax
+from mindspore.ops import clamp, mul,  round, bitwise_or, stack, div
+uint8 = dtype.uint8
+
+def minTensor(t, dim, keepdim=False):
+    return msMin(t, axis=dim, keepdims=keepdim)
+
+def maxTensor(t, dim, keepdim=False):
+    return msMax(t, axis=dim, keepdims=keepdim)
+
+def toNumpy(a):
+    return a.asnumpy()
+
+
+# from torch import Tensor,  uint8
+# import torch
+# from torch import clamp, round, div, bitwise_or, stack, mul
+
+# def toNumpy(a):
+#     return a.numpy()
+
+# def minTensor(t, dim, keepdim=False):
+#     return torch.min(t, dim=dim, keepdim=keepdim)
+# def maxTensor(t, dim, keepdim=False):
+#     return torch.max(t, dim=dim, keepdim=keepdim)
+
+
+
+
 import numpy as np
 
 class compressConfig:
@@ -8,7 +37,7 @@ class compressConfig:
     groupSize = 32
 
 def printAvg(a, name):
-    print(f" >>> {name} average: {average(a)}, dtype: {a.dtype}")
+    print(f" >>> {name} average: {a.mean()}, dtype: {a.dtype}")
 
 def lastDimEvenSlice(shape):
     """
@@ -38,24 +67,24 @@ def compress(data:Tensor):
     # print(f"new shape is: {newShape}")
     data = data.reshape(newShape)  # eg. (b, s, ng, g) ->  (b, s, h)
 
-    mx = ops.max(data, axis=-1, keepdims=True)[0]
-    mn = ops.min(data, axis=-1, keepdims=True)[0]
+    mx = maxTensor(data, dim=-1, keepdim=True)[0]
+    mn = minTensor(data, dim=-1, keepdim=True)[0]
     
     r = 2 ** compressConfig.nbit - 1
     scale = r / (mx-mn+1e-9)
 
     compressed = (data - mn) 
-    compressed = ops.mul(compressed, scale)
-    compressed = ops.clamp(compressed, min=0, max=r)
-    compressed = ops.round(compressed) #.to(dtype=dtype.uint8)
-    compressed = compressed.to(dtype.uint8)
+    compressed = mul(compressed, scale)
+    compressed = clamp(compressed, min=0, max=r)
+    compressed = round(compressed) #.to(dtype=dtype.uint8)
+    compressed = compressed.to(uint8)
 
     upperSlice, lowerSlice = lastDimEvenSlice(data.shape)
     upper :Tensor = compressed[upperSlice].bitwise_left_shift(4)
     lower :Tensor = compressed[lowerSlice]
-    compressed = ops.bitwise_or(upper, lower)
+    compressed = bitwise_or(upper, lower)
 
-    extra = ops.stack([scale, mn])
+    extra = stack([scale, mn])
     
     return compressed, extra
     
@@ -79,7 +108,7 @@ def decompress(data, extra, shape):
     data[upperSlice] = upper
     data[lowerSlice] = lower
 
-    data = ops.div(data, scale)
+    data = div(data, scale)
     data = mn + data
 
     originShape = data.shape[:-2] + (ng*g, )
@@ -97,8 +126,8 @@ def testCompressWithShape(shape):
     diff = a - a1
 
     printAvg(diff, "diff")
-    print(f"input size: {a.asnumpy().nbytes} bytes")
-    print(f"output size: {c.asnumpy().nbytes} bytes")
+    print(f"input size: {toNumpy(a).nbytes} bytes")
+    print(f"output size: {toNumpy(c).nbytes} bytes")
 
 
 def testCompress():

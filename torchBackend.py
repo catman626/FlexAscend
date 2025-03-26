@@ -1,8 +1,12 @@
 import torch
-from torch import dtype
-from torch import arange, cumsum, Tensor
+from torch import Tensor, dtype
+from torch import arange, cumsum, argmax, concat, bmm
 from torch.nn import ReLU
-from torch.nn.functional import linear, layer_norm, softmax
+import torch.nn.functional as F 
+from torch.nn.functional import linear
+import numpy as np
+import os
+from compress import compress
 
 
 class AscendTensor:
@@ -44,7 +48,7 @@ class DiskTensor:
         if DiskTensor.compress:
             data, extra = compress(data)
             
-            np.save(self.filename, data.asnumpy())
+            torch.save(self.filename, data.asnumpy())
             np.save(self.filename+".extra", extra.asnumpy())
         else:
             if isinstance(data, Tensor):
@@ -101,12 +105,19 @@ class FlexTensor:
     def initZeros(self):
         return self.tensor.store(Tensor(np.zeros(self.shape, dtype=np.float32)))
 
-def BatchMatMul(A, B):
-    return torch.bmm(A, B)
+def batchMatMul(A, B, transposeA=False, transposeB=False):
+    Ad = A.data()
+    Bd = B.data()
+    if transposeA :
+        Ad = Ad.T
+    if transposeB:
+        Bd = Bd.T
+
+    return torch.bmm(Ad, Bd)
 
 
 def layernorm(x:FlexTensor, normalizedShape:FlexTensor, weight:FlexTensor, bias:FlexTensor):
-    return layer_norm(x.data(), normalizedShape, weight.data(), bias.data())
+    return F.layer_norm(x.data(), normalizedShape, weight.data(), bias.data())
 
 def batchMatMul(x:FlexTensor, y:FlexTensor):
     return torch.bmm(x.data(), y.data())
@@ -114,15 +125,15 @@ def batchMatMul(x:FlexTensor, y:FlexTensor):
 def argmax(x:FlexTensor):
     return torch.argmax(x.data(), dim=-1)
 
-def sqrt(x:FlexTensor):
-    return torch.sqrt(x.data())
+def sqrt(x):
+    return x ** -0.5
 
 def makeMask(attentionMask, s):
 
     ids = arange(0, s)
     casualMask = ids <= ids.view(s, 1)
     if attentionMask is not None:
-        mask = logicalAnd(casualMask.view(1, s, s), attentionMask.view(b, 1, s))
+        mask = casualMask.view(1, s, s) & attentionMask.view(b, 1, s)
     else :
         mask = casualMask.view(1, s, s) 
 
@@ -172,7 +183,7 @@ def mha_prefill(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int):
     # mask
     assert mask.shape == (b, s, s) 
     score = torch.where(mask.view(b, 1, s, s), score, -1e4) 
-    score = softmax(score)
+    score = F.softmax(score)
 
     # (b, nh, s, s) * (b, nh, s, h1) -> (b, nh, s, h1)
     attnOut = torch.bmm(score, v)        
@@ -218,4 +229,29 @@ def mha_decode(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int) :
     # (b, nh, 1, h1) -> (b, 1, nh, h1) -> (b, 1, h)
     attnOut = attnOut.permute(0, 2, 1, 3).flatten(start_dim=2)
     
+    return attnOut
+
+def gather(weight, idx, padding):
+    return F.embedding(idx, weight, padding)
+
+def decode(x, qProj, kProj, vProj, outProj, kCache, vCache, attentionMask, numHead):
+    b, s, h = x.shape
+    assert s == 1
+
+    normalX = F.layer_norm(x)
+    # (b, s, h)
+    q, k, v = qProj(normalX), kProj(normalX), vProj(normalX)
+    kcache = kCache.data()
+    vcache = vCache.data()
+    k = concat((kcache, k), axis=1)
+    v = concat((vcache, v), axis=1)
+    kCache.store(k)
+    vCache.store(v)
+
+    mhaOut = mha_decode(q, k, v, attentionMask, numHead)
+
+    attnOut = outProj(mhaOut)
+
+    attnOut = attnOut + x
+
     return attnOut

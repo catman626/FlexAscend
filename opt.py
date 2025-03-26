@@ -1,7 +1,7 @@
 from transformers import AutoTokenizer
 
-from torchBackend import dtype, linear, layernorm, arange,  ReLU, Add, cumsum, BatchMatMul, Argmax, sqrt, makeMask, argmax
-
+from torchBackend import dtype, layernorm, arange, linear, ReLU, cumsum, batchMatMul, argmax, sqrt, makeMask, argmax, mha_decode, mha_prefill, prefill, concat, gather, decode
+from mindspore import load_checkpoint
 # from mindspore import nn, ops, dtype, Parameter, common, Tensor
 # from mindspore.common.initializer import initializer, Zero
 # from mindspore import load_checkpoint
@@ -107,26 +107,8 @@ class Attention:
         x.shape (b, 1, h)
         attentionMask in shape (b, 1, s)
         """
-        b, s, h = x.shape
-        assert s == 1
-
-        normalX = self.layernorm(x)
-        # (b, s, h)
-        q, k, v = self.qProj(normalX), self.kProj(normalX), self.vProj(normalX)
-        kcache = self.kCache.data()
-        vcache = self.vCache.data()
-        k = concat((kcache, k), axis=1)
-        v = concat((vcache, v), axis=1)
-        self.kCache.store(k)
-        self.vCache.store(v)
-
-        mhaOut = mha_decode(q, k, v, attentionMask, self.numHead)
-
-        attnOut = self.outProj(mhaOut)
-
-        attnOut = self.residual(attnOut, x)
-
-        return attnOut
+        return decode(x, self.qProj, self.kProj, self.vProj, self.outProj, self.kCache, self.vCache, attentionMask, self.numHead)
+        
 
     def construct(self, x, iterno, attnMask):
         assert attnMask is None or len( attnMask.shape ) == 2
@@ -149,7 +131,6 @@ class FeedForward:
         self.linear1 = Linear(name+".linear1", hiddenSize, ffnHiddenSize)
         self.relu = ReLU()
         self.linear2 = Linear(name+".linear2", ffnHiddenSize, hiddenSize)
-        self.residual = Add()
 
     def getParameters(self):
         return {
@@ -169,8 +150,7 @@ class FeedForward:
         o = self.linear1(o)
         o = self.relu(o)
         o = self.linear2(o)
-        
-        ffnOut = self.residual(o, x)
+        ffnOut = o + x
         return ffnOut
         
 
@@ -199,20 +179,13 @@ class TransformerLayer:
         assert ffnOut.dtype==dtype.float32
         return ffnOut
 
-def lazyParameter(shape, name):
-    return Parameter(
-            initializer(init="normal", shape = shape),
-            name = name,
-        )
 
-class InputEmbed(nn.Cell):
+class InputEmbed:
     #inputembed
     def __init__(self, config:OptConfig):
         super().__init__()
         self.tokenEmbedWeight = FlexTensor(shape=(config.vocabSize, config.hiddenSize), name="inputEmbed.tokenWeight")
         self.posEmbedWeight = FlexTensor(shape=(config.maxSeqLen + 2, config.hiddenSize), name="inputEmbed.posWeight")
-        self.gather = Gather()
-        self.add = Add()
 
     def getParameters(self):
         return { self.tokenEmbedWeight, self.posEmbedWeight }
@@ -234,11 +207,11 @@ class InputEmbed(nn.Cell):
         # assert self.tokenEmbedWeight.dtype == dtype.float32
         # assert self.posEmbedWeight.dtype == dtype.float32
 
-        tokenEmbed = self.gather(self.tokenEmbedWeight, inputIDs, 0)
+        tokenEmbed = gather(self.tokenEmbedWeight, inputIDs, 0)
 
         posIds = cumsum(attentionMask.to(dtype=dtype.int32), axis=1)
         
-        posEmbed = self.gather(self.posEmbedWeight, posIds, 0)
+        posEmbed = gather(self.posEmbedWeight, posIds, 0)
 
         currLength = attentionMask.shape[1]
         inputIDLength = inputIDs.shape[1]
@@ -260,8 +233,6 @@ class OutputEmbed:
         self.tokenWeight = FlexTensor(shape=(config.vocabSize, config.hiddenSize), name="outputEmbed.tokenWeight")
         
         self.layernorm = Layernorm("outputEmbed.layernorm", config.hiddenSize)    
-        self.matmul = BatchMatMul(transpose_b=True)
-        self.argmax = Argmax()
 
     def getParameters(self):
         return self.layernorm.getParameters().union({self.tokenWeight})
@@ -275,14 +246,12 @@ class OutputEmbed:
         (B, S, H) -> (B, )
         will take the last token to expect 
         """
-        assert self.tokenWeight.data().dtype == dtype.float32, f"invalid dtype: {self.tokenWeight.dtype}"
         assert len(x.shape) == 3
-
         lastToken = x[:, -1, :]
 
         normalized = self.layernorm(lastToken)
         
-        output = self.matmul(normalized, self.tokenWeight.data())
+        output = batchMatMul(normalized, self.tokenWeight, transposeB=True)
         # print(f">>> before argmax, output[0] is {output[0]}, shape: {output[0].shape}")  # (vocab)
         
         outputIDs = argmax(output)
