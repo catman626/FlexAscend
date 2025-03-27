@@ -430,7 +430,8 @@ class OPT:
             [self.attentionMask, torch.ones((B,  1), dtype=torch.bool) ], dim=1)
             
     def run(self, inputSentences: list[str], numIter):
-        promptLen = max([len(l) for l in inputSentences])
+        # promptLen = max([len(l) for l in inputSentences])
+        promptLen = 32
         inputTokens = self.tokenizer(inputSentences, padding="max_length",  max_length=promptLen).input_ids
         self.tokensBuffer = Tensor(inputTokens).to(torch.int32) 
 

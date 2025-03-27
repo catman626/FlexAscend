@@ -10,6 +10,7 @@ from compress import compress, decompress
 
 from utils import peekTensor
 
+cnt=0
 
 class AscendTensor:
     def __init__(self):
@@ -134,10 +135,19 @@ def mha_prefill(q:Tensor, k:Tensor, v:Tensor, attentionMask:Tensor, numHead:int)
     headDim = h // numHead 
 
     scaling = headDim ** -0.5
+    q = q * scaling
+
+    global cnt
+    torch.save(q, f"comp/my/q.{cnt}")
+    torch.save(k, f"comp/my/k.{cnt}")
+    torch.save(v, f"comp/my/v.{cnt}")
+    cnt+=1
+
     # (b, s, nh, h1)
-    q = q.view(b, s, numHead, headDim) * scaling
+    q = q.view(b, s, numHead, headDim) 
     k = k.view(b, s, numHead, headDim)
     v = v.view(b, s, numHead, headDim)
+
 
     q = q.permute(0, 2, 1, 3).reshape(b*numHead, s, headDim)
     k = k.permute(0, 2, 3, 1).reshape(b*numHead, headDim, s)
