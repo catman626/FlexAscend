@@ -93,6 +93,9 @@ class Attention:
         x: (b, s, h)  
         attentionMask in shape: (B, s)
         """
+        global cnt
+        torch.save(x, f"comp/my/attnIn.{cnt}")
+
         b, s, h = x.shape
         self.kCache = FlexTensor(self.name+".kcache", (b,self.config.maxSeqLen, h))
         self.vCache = FlexTensor(self.name+".vcache", (b,self.config.maxSeqLen, h))
@@ -104,14 +107,12 @@ class Attention:
         self.vCache.store(v)
 
         # make a casual mask and combine it with attention mask
-
         mhaOut = mha_prefill(q, k, v, attentionMask, self.numHead) 
 
         attnOut = self.outProj(mhaOut)
 
         attnOut = attnOut + x
         
-        global cnt
         torch.save(attnOut, f"comp/my/attn.{cnt}")
         cnt = cnt+1
 
@@ -487,7 +488,7 @@ if __name__ == "__main__":
     timers("load").stop()
 
     testBatchSize = 4
-    numIter = 10
+    numIter = 1
     inputs = [
         "Paris is the capital city of",
     ] * testBatchSize
