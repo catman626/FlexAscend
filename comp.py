@@ -36,7 +36,27 @@ def testAttentionOutput():
 
 		diffq, diffk, diffv = comp(q, q1), comp(k, k1), comp(v, v1) 
 
-		print(f"diff of attention.{i:.4f} input: {diffIn:.4f}, q:{diffq:.4f}, k:{diffk:.4f}, v:{diffv:.4f},  output: {diff:.4f}")
+		mha = loadRefRecord(f"ref/mha.{i}")
+		mha1 = loadRecord(f"my/mha.{i}")
+		diffmha = comp(mha, mha1)
+
+		residual = loadRefRecord(f"ref/residual.{i}")
+		residual1 = loadRecord(f"my/residual.{i}")
+		diffresidual = comp(residual, residual1)
+
+		outproj = loadRefRecord(f"ref/outProj.{i}")
+		outproj1 = loadRecord(f"my/outProj.{i}")
+		diffoutProj = comp(outproj, outproj1)
+
+		report = ""
+		report += f"diff of attentionOut.{diff:.4f}"
+		report += f", diff of attentionIn.{diffIn:.4f}"
+		# report += f", diff of q.{diffq:.4f}, k.{diffk:.4f}, v.{diffv:.4f}"
+		# report += f", mha : {diffmha:.4f}"
+		report += f", outProj : {diffoutProj:.4f}"
+		report += f", residual : {diffresidual:.4f}"
+
+		print(report)
 
 def testInputEmbed():
 	a=loadRefRecord("ref/inputEmbed")
