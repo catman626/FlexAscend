@@ -7,3 +7,4 @@ checkpoint_download
 weight_cache_home/*
 __pycache__
 weightHome
+comp/

@@ -4,7 +4,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from torchBackend import FlexTensor, mha_prefill, mha_decode
+from backend import FlexTensor, mha_prefill, mha_decode
 
 import os
 from timer import timers
@@ -16,7 +16,9 @@ import argparse
 import threading
 from utils import ValueHolder, prettyTime, integerType, peekTensor
 
-from optConfig import OptConfig, getOptConfig
+from config import OptConfig, getOptConfig
+
+cnt = 0
 
 class Linear:
     def __init__(self, name, inputChannel:int, outputChannel:int):
@@ -102,16 +104,16 @@ class Attention:
         self.vCache.store(v)
 
         # make a casual mask and combine it with attention mask
-        # mask = makeMask(attentionMask, s)
-        ids = torch.arange(0, s)
-        casualMask = ids <= ids.view(s, 1)
-        mask = casualMask.view(1, s, s) & attentionMask.view(b, 1, s)
 
-        mhaOut = mha_prefill(q, k, v, mask, self.numHead) 
+        mhaOut = mha_prefill(q, k, v, attentionMask, self.numHead) 
 
         attnOut = self.outProj(mhaOut)
 
         attnOut = attnOut + x
+        
+        global cnt
+        torch.save(attnOut, f"comp/my/attn.{cnt}")
+        cnt = cnt+1
 
         return attnOut
     
@@ -240,7 +242,7 @@ class InputEmbed:
         tokenEmbed = F.embedding( inputIDs, self.tokenEmbedWeight.data() ,0)
 
         posIds = torch.cumsum(attentionMask, dim=1) * attentionMask + 1
-        peekTensor(posIds, " >>> posIds")
+        # peekTensor(posIds, " >>> posIds")
         
         posEmbed = F.embedding(posIds, self.posEmbedWeight.data())
         
@@ -253,6 +255,7 @@ class InputEmbed:
         embed = tokenEmbed + posEmbed
         
         assert len(embed.shape) == 3
+        torch.save(embed, "comp/my/inputEmbed")
         return embed
 
 class OutputEmbed:
@@ -483,10 +486,10 @@ if __name__ == "__main__":
     model = OPT(config)
     timers("load").stop()
 
-    testBatchSize = 2
+    testBatchSize = 4
     numIter = 10
     inputs = [
-        "Beijing is the capital city of",
+        "Paris is the capital city of",
     ] * testBatchSize
     
     print(f" >>> batch size: {testBatchSize}")
