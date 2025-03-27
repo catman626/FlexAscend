@@ -137,6 +137,8 @@ def makeMask(attentionMask:Tensor, s:int):
 
 
 def mha_prefill(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int):
+    """
+    mask is the combination of attention mask and casual mask"""
     b, s, h = q.shape
     
     assert h % numHead == 0
@@ -172,6 +174,8 @@ def mha_prefill(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int):
     return attnOut 
     
 def mha_decode(q:Tensor, k:Tensor, v:Tensor, mask:Tensor, numHead:int) :
+    """
+    mask : (b, s)"""
     assert q.shape[1] == 1
     b, s, h = k.shape
     # s include the token generated in this iteration

@@ -3,15 +3,10 @@ from transformers import AutoTokenizer
 import torch
 import torch.nn.functional as F
 from torch import Tensor
-from mindspore import load_checkpoint
 
-from torchBackend import FlexTensor, makeMask, mha_prefill, mha_decode
+from torchBackend import FlexTensor, mha_prefill, mha_decode
 
-import numpy as np
-import math
 import os
-
-
 from timer import timers
 from tqdm import tqdm
 
@@ -19,7 +14,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import argparse
 import threading
-from utils import ValueHolder, prettyTime, integerType
+from utils import ValueHolder, prettyTime, integerType, peekTensor
 
 from optConfig import OptConfig, getOptConfig
 
@@ -92,8 +87,10 @@ class Attention:
             l.loadWeight()
 
     def prefill(self, x:Tensor, attentionMask:Tensor):
-
-        """ all in form (b, s, h)  """
+        """ 
+        x: (b, s, h)  
+        attentionMask in shape: (B, s)
+        """
         b, s, h = x.shape
         self.kCache = FlexTensor(self.name+".kcache", (b,self.config.maxSeqLen, h))
         self.vCache = FlexTensor(self.name+".vcache", (b,self.config.maxSeqLen, h))
@@ -105,7 +102,10 @@ class Attention:
         self.vCache.store(v)
 
         # make a casual mask and combine it with attention mask
-        mask = makeMask(attentionMask, s)
+        # mask = makeMask(attentionMask, s)
+        ids = torch.arange(0, s)
+        casualMask = ids <= ids.view(s, 1)
+        mask = casualMask.view(1, s, s) & attentionMask.view(b, 1, s)
 
         mhaOut = mha_prefill(q, k, v, mask, self.numHead) 
 
@@ -124,7 +124,7 @@ class Attention:
         assert s == 1
 
         normalX = self.layernorm(x)
-    # (b, s, h)
+        # (b, s, h)
         q, k, v = self.qProj(normalX), self.kProj(normalX), self.vProj(normalX)
         kcache = self.kCache.data()
         vcache = self.vCache.data()
@@ -150,9 +150,6 @@ class Attention:
         else :
             return self.decode(x, attnMask)
 
-    # def forward(self, x, iterno, attnMask):
-    #     return self.construct(x, iterno, attnMask)
-        
 
 class FeedForward:
     #ffn
@@ -179,7 +176,6 @@ class FeedForward:
             l.loadWeight()
 
     def __call__(self, x, iterno, attnMask):
-
         o = self.layernorm(x)
         o = self.linear1(o)
         o = self.relu(o)
@@ -197,7 +193,10 @@ class TransformerLayer:
         self.ffn = FeedForward(name=name+".ffn", config=config)
 
     def getParameters(self):
-        return self.attn.getParameters().union(self.ffn.getParameters())
+        return {
+            *self.attn.getParameters(),
+            *self.ffn.getParameters()
+        }
 
     def loadWeight(self):
         self.attn.loadWeight()
@@ -215,15 +214,16 @@ class InputEmbed:
     #inputembed
     def __init__(self, config:OptConfig):
         super().__init__()
-        self.tokenEmbedWeight = FlexTensor(shape=(config.vocabSize, config.hiddenSize), name="inputEmbed.tokenWeight")
-        self.posEmbedWeight = FlexTensor(shape=(config.maxSeqLen + 2, config.hiddenSize), name="inputEmbed.posWeight")
+        self.tokenEmbedWeight = FlexTensor("inputEmbed.tokenWeight", 
+                                           (config.vocabSize, config.hiddenSize))
+        self.posEmbedWeight = FlexTensor("inputEmbed.posWeight",
+                                         (config.maxSeqLen + 2, config.hiddenSize))
 
     def getParameters(self):
         return { self.tokenEmbedWeight, self.posEmbedWeight }
 
-
     def loadWeight(self):
-        for l in [ self.tokenEmbedWeight, self.posEmbedWeight ]:
+        for l in self.getParameters():
             l.load()
 
     def __call__(self, inputIDs:Tensor, iterno, attentionMask:Tensor):
@@ -239,10 +239,11 @@ class InputEmbed:
 
         tokenEmbed = F.embedding( inputIDs, self.tokenEmbedWeight.data() ,0)
 
-        posIds = torch.cumsum(attentionMask.to(torch.int32), axis=1)
+        posIds = torch.cumsum(attentionMask, dim=1) * attentionMask + 1
+        peekTensor(posIds, " >>> posIds")
         
-        posEmbed = F.embedding(posIds, self.posEmbedWeight.data(), 0)
-
+        posEmbed = F.embedding(posIds, self.posEmbedWeight.data())
+        
         currLength = attentionMask.shape[1]
         inputIDLength = inputIDs.shape[1]
         previousIDsLength = currLength - inputIDLength
@@ -263,7 +264,10 @@ class OutputEmbed:
         self.layernorm = Layernorm("outputEmbed.layernorm", config.hiddenSize)    
 
     def getParameters(self):
-        return self.layernorm.getParameters().union({self.tokenWeight})
+        return {
+            *self.layernorm.getParameters(),
+            self.tokenWeight
+        }
 
     def loadWeight(self):
         self.tokenWeight.load()
@@ -280,12 +284,8 @@ class OutputEmbed:
         normalized = self.layernorm(lastToken)
         
         output = F.linear(normalized, self.tokenWeight.data())
-        
-        # print(f">>> before argmax, output[0] is {output[0]}, shape: {output[0].shape}")  # (vocab)
 
-        
         outputIDs = torch.argmax(output, dim=-1)
-        # print(f">>> after argmax, output[0] is {outputIDs[0]}, shape: {outputIDs[0].shape}")
         
         assert len(outputIDs.shape) == 1   # output shape: (B, S), element is id
         assert integerType(outputIDs.dtype)
@@ -303,7 +303,6 @@ class OPT:
         self.inputEmbed = InputEmbed(config)
         
         layers.append(self.inputEmbed)
-
         
         for i in range(config.numHiddenLayer):
             layers.append(
@@ -318,7 +317,6 @@ class OPT:
 
         self.tokensBuffer: FlexTensor = None
         self.maxSeqLen = config.maxSeqLen
-        self.attentionMask :FlexTensor = None   # true : valid, false : neglect
 
     def getParameters(self):
         ret = set()
@@ -333,7 +331,7 @@ class OPT:
     def loadModelFromFile(self, weightFname:str):
         assert isinstance(weightFname, str), f"invalid type: {type(weightFname)}"
         
-        weights = load_checkpoint(weightFname)
+        weights = torch.load(weightFname)
         unusedWeight = set(weights.keys())
         loaded = []
 
@@ -409,7 +407,6 @@ class OPT:
             return 
 
         for l in range(self.numLayers):
-            # print(f" \t\t>>>layer {l}")
             self.loadLayer(l)
             self.compute(iterNo, l)
 
@@ -486,8 +483,8 @@ if __name__ == "__main__":
     model = OPT(config)
     timers("load").stop()
 
-    testBatchSize = 64
-    numIter = 20
+    testBatchSize = 2
+    numIter = 10
     inputs = [
         "Beijing is the capital city of",
     ] * testBatchSize

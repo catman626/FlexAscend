@@ -62,3 +62,7 @@ def integerType(t):
         torch.int32,
         torch.int64
     }
+
+def peekTensor(t, prompt):
+    print(f"{prompt} {t}")
+    

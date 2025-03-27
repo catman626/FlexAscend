@@ -40,10 +40,16 @@ def main(torchCkpt, mindsporeCkpt):
     for name, weight in tqdm(torchWeight.items()):
         name = replaceName(name)
         
-        mindsporeWeight.append({ 'name': name, 'data': torch2ms(weight)})
+        # only change name, not weight, 
+        # save as a torch file
+        mindsporeWeight.append({ 'name': name, 'data': weight})
+        # mindsporeWeight.append({ 'name': name, 'data': torch2ms(weight)})
 
-    ms.save_checkpoint(mindsporeWeight, mindsporeCkpt)
-
+    # ms.save_checkpoint(mindsporeWeight, mindsporeCkpt)
+    torchDict = dict()
+    for item in mindsporeWeight:
+        torchDict[item['name']] = item['data']
+    torch.save(torchDict, mindsporeCkpt)
 
 import argparse
 if __name__ == "__main__":
