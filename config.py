@@ -9,7 +9,7 @@ class OptConfig:
         self.dtype = dtype.float32
         self.hasBias = True
         self.maxSeqLen= maxSeqLen
-        self.inputLen = inputDim
+        self.inputDim = inputDim
         self.batchSize = 64
 
         self.numHiddenLayer = numHiddenLayer

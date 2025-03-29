@@ -1,4 +1,7 @@
 import torch
+from config import OptConfig
+
+GB = 1 << 30
 
 class ValueHolder:
     def __init__(self):
@@ -66,3 +69,25 @@ def integerType(t):
 def peekTensor(t, prompt):
     print(f"{prompt} {t}")
     
+def model_bytes(config: OptConfig):
+    h = config.inputDim
+    nelement = (config.numHiddenLayer * (
+    # attention
+    h * (3 * h + 1) + h * (h + 1) +
+    # mlp
+    h * (4 * h + 1) + h * 4 * (h + 1) +
+    # layer norm
+    h * 4) +
+    # embedding
+    config.vocabSize * (h + 1))
+
+    return nelement * 2
+
+def cache_bytes(config:OptConfig, batchSize, seqLen):
+    # assuming float16
+    nelement = config.numHiddenLayer * seqLen * batchSize * config.inputDim * 2
+    return nelement * 2
+
+def hidden_bytes(config:OptConfig, batchSize, seqLen):
+    # assuming float16
+    return batchSize * seqLen * config.inputDim * 2

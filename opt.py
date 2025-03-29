@@ -14,7 +14,9 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import argparse
 import threading
-from utils import ValueHolder, prettyTime, integerType, peekTensor
+from utils import ValueHolder, prettyTime, integerType, peekTensor, GB
+import utils 
+
 
 from config import OptConfig, getOptConfig
 
@@ -434,9 +436,8 @@ class OPT:
         self.attentionMask = torch.concat(
             [self.attentionMask, torch.ones((B,  1), dtype=torch.bool) ], dim=1)
             
-    def run(self, inputSentences: list[str], numIter):
+    def run(self, inputSentences: list[str], promptLen, numIter):
         # promptLen = max([len(l) for l in inputSentences])
-        promptLen = 32
         inputTokens = self.tokenizer(inputSentences, padding="max_length",  max_length=promptLen).input_ids
         self.tokensBuffer = Tensor(inputTokens).to(torch.int32) 
 
@@ -484,27 +485,35 @@ if __name__ == "__main__":
     if args.compress:
         FlexTensor.setCompess(True)
 
+    testBatchSize = 64
+    numIter = 10
+    inputs = [
+        "Beijing is the capital city of",
+    ] * testBatchSize
+    promptLen = 32
+    modelSize = utils.model_bytes(config)  
+    cacheSize = utils.cache_bytes(config, testBatchSize, promptLen)
+    hiddenSize = utils.hidden_bytes(config, testBatchSize, promptLen)
+
     print("\n " + ">>>"*6 + " inference begin " + "<<<"*6)
     print(f" >>> settings: ")
     print(f" >>> model: {args.model}")
     print(f" >>> prefetch: {OPT.prefetch}")
     print(f" >>> offload: {args.offload}")
+    print(f" >>> model size: model: {modelSize/GB:.3f}GB,"
+          f" cache: {cacheSize / GB:.3f}GB,"
+          f" hidden: {hiddenSize / GB:.3f}GB")
     timers("load").start()
     model = OPT(config)
     timers("load").stop()
-
-    testBatchSize = 4
-    numIter = 10
-    inputs = [
-        "Paris is the capital city of",
-    ] * testBatchSize
     
     print(f" >>> batch size: {testBatchSize}")
     timers("model").start()
     
-    outputs = model.run(inputs, numIter)
-    for s in outputs:
-        print(s)
+    outputs = model.run(inputs, promptLen, numIter)
+    if args.ckpt is not None:
+        for s in outputs:
+            print(s)
 
     timers("model").stop()
 
