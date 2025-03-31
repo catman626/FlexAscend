@@ -471,6 +471,7 @@ if __name__ == "__main__":
     parser.add_argument("--prefetch", action="store_true")
     parser.add_argument("--compress", action="store_true")
     parser.add_argument("--interact", action="store_true")
+    parser.add_argument("--batch-size", type=int, default=64)
 
     args = parser.parse_args()
 
@@ -485,7 +486,7 @@ if __name__ == "__main__":
     if args.compress:
         FlexTensor.setCompess(True)
 
-    testBatchSize = 64
+    testBatchSize = args.batch_size
     numIter = 10
     inputs = [
         "Beijing is the capital city of",
@@ -495,25 +496,27 @@ if __name__ == "__main__":
     cacheSize = utils.cache_bytes(config, testBatchSize, promptLen)
     hiddenSize = utils.hidden_bytes(config, testBatchSize, promptLen)
 
-    print("\n " + ">>>"*6 + " inference begin " + "<<<"*6)
-    print(f" >>> settings: ")
-    print(f" >>> model: {args.model}")
-    print(f" >>> prefetch: {OPT.prefetch}")
-    print(f" >>> offload: {args.offload}")
-    print(f" >>> model size: model: {modelSize/GB:.3f}GB,"
-          f" cache: {cacheSize / GB:.3f}GB,"
-          f" hidden: {hiddenSize / GB:.3f}GB")
+    r = utils.report(banner="inference begin",
+                     model=config.modelName,
+                     prefetch=args.prefetch,
+                     offload=args.offload,
+                     batchSize=args.batch_size,
+                     compress=args.compress,
+                     modelSize=modelSize,
+                     cacheSize=cacheSize,
+                     hiddenSize=hiddenSize
+                     )
+    print(r)
     timers("load").start()
     model = OPT(config)
     timers("load").stop()
     
-    print(f" >>> batch size: {testBatchSize}")
     timers("model").start()
-    
-    outputs = model.run(inputs, promptLen, numIter)
-    if args.ckpt is not None:
-        for s in outputs:
-            print(s)
+    if not args.interact:
+        outputs = model.run(inputs, promptLen, numIter)
+        if args.ckpt is not None:
+            for s in outputs:
+                print(s)
 
     timers("model").stop()
 
@@ -522,23 +525,28 @@ if __name__ == "__main__":
 
     if args.interact:
         while True:
-            sentence = input(" >>> plase input the question\n")
+            sentence = input(" >>> plase input the question\n >>> xxx to quit\n")
             if sentence == "xxx":
                 break
-            outputs = model.run([sentence])
+            outputs = model.run([sentence], 32, 32)
             for s in outputs:
                 print(s)
 
-    print(f" >>> load model take time: {prettyTime(loadTime)}")
-    print(f" >>> inference take time: {prettyTime(inferenceTime)}")
+    print(utils.report(inferenceTime=inferenceTime,loadTime=loadTime, batchSize=args.batch_size, numIter=numIter))
 
     with open("default_log", "a+") as f:
-        f.write(f"\n {'>>>'*6} model run {'<<<' * 6}")
-        f.write(f" >>> model: {args.model}\n")
-        f.write(f" >>> prefetch: {OPT.prefetch}\n")
-        f.write(f" >>> offload: {args.offload}\n")
-        f.write(f" >>> batch size: {testBatchSize}")
-        f.write(f" >>> compress: {args.compress}")
-        f.write(f" >>> load model take time: {prettyTime(loadTime)}\n")
-        f.write(f" >>> inference take time: {prettyTime(inferenceTime)}\n")
-        f.write(f" >>> per-token: {prettyTime(inferenceTime / testBatchSize / numIter)}\n")
+        r = utils.report(banner="OPT run",
+                         model=config.modelName, 
+                         prefetch=args.prefetch, 
+                             offload=args.offload, 
+                             batchSize=args.batch_size,
+                             compress=args.compress,
+                            modelSize=modelSize,
+                            cacheSize=cacheSize,
+                            hiddenSize=hiddenSize,
+                            loadTime=loadTime,
+                            inferenceTime=inferenceTime,
+                            numIter=numIter
+        )
+                             
+        f.write(r)

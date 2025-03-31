@@ -91,3 +91,42 @@ def cache_bytes(config:OptConfig, batchSize, seqLen):
 def hidden_bytes(config:OptConfig, batchSize, seqLen):
     # assuming float16
     return batchSize * seqLen * config.inputDim * 2
+
+    
+
+def report(banner=None, 
+           model=None, 
+           prefetch=None, 
+           offload=None, 
+           batchSize=None, 
+           compress=None, 
+           modelSize=None, 
+           cacheSize=None, 
+           hiddenSize=None, 
+           loadTime=None, 
+           inferenceTime=None, 
+           numIter=None):
+    r = f"\n {'>>>'*6} {banner} {'<<<' * 6}" \
+        if banner is not None \
+        else ""
+
+    for tag, p in zip(
+        ["model", "prefetch", "offload", "batchSize", "compress", "loadTime", "inferenceTime" ],
+        [model,    prefetch ,  offload,   batchSize,   compress,   loadTime,   inferenceTime ]):
+        if p is not None:
+            r += f" >>> {tag}: {p}\n"
+
+    for tag, s in zip(
+        ["modelSize", "cacheSize", "hiddenSize"],
+        [modelSize, cacheSize, hiddenSize ]
+    ):
+        if s is not None:
+            r += f" >>> {tag}: {s / GB:.3f}GB\n"
+        
+    if inferenceTime is not None \
+        and numIter is not None \
+        and batchSize is not None:
+        r += f" >>> per-token: {prettyTime(inferenceTime / batchSize / numIter)}\n"
+        r += f" >>> throughput : {batchSize * numIter/ inferenceTime:.4f} token/s\n"
+
+    return r
