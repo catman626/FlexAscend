@@ -496,7 +496,7 @@ if __name__ == "__main__":
     cacheSize = utils.cache_bytes(config, testBatchSize, promptLen)
     hiddenSize = utils.hidden_bytes(config, testBatchSize, promptLen)
 
-    r = utils.report(banner="inference begin",
+    print(utils.report(banner="inference begin",
                      model=config.modelName,
                      prefetch=args.prefetch,
                      offload=args.offload,
@@ -505,8 +505,7 @@ if __name__ == "__main__":
                      modelSize=modelSize,
                      cacheSize=cacheSize,
                      hiddenSize=hiddenSize
-                     )
-    print(r)
+                     ))
     timers("load").start()
     model = OPT(config)
     timers("load").stop()
@@ -548,5 +547,4 @@ if __name__ == "__main__":
                             inferenceTime=inferenceTime,
                             numIter=numIter
         )
-                             
         f.write(r)

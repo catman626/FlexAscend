@@ -105,7 +105,8 @@ def report(banner=None,
            hiddenSize=None, 
            loadTime=None, 
            inferenceTime=None, 
-           numIter=None):
+           perTokenTime=None,
+           throughput=None):
     r = f"\n {'>>>'*6} {banner} {'<<<' * 6}" \
         if banner is not None \
         else ""
@@ -123,10 +124,17 @@ def report(banner=None,
         if s is not None:
             r += f" >>> {tag}: {s / GB:.3f}GB\n"
         
-    if inferenceTime is not None \
-        and numIter is not None \
-        and batchSize is not None:
-        r += f" >>> per-token: {prettyTime(inferenceTime / batchSize / numIter)}\n"
-        r += f" >>> throughput : {batchSize * numIter/ inferenceTime:.4f} token/s\n"
+    if inferenceTime is not None:
+        r += f" >>> inference-time: {prettyTime(inferenceTime)}\n"
+    
+    if perTokenTime is not None:
+        r += f" >>> per-token: {prettyTime(perTokenTime)}\n"
+
+    if throughput is not None:
+        r += f" >>> throughput : {throughput:.4f} token/s\n"
+
+    
+
+    
 
     return r
