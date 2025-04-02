@@ -1,29 +1,27 @@
-from mindspore import Tensor, dtype
-from mindspore.ops import min as msMin
-from mindspore.ops import max as msMax
-from mindspore.ops import clamp, mul,  round, bitwise_or, stack, div
-uint8 = dtype.uint8
-
-def minTensor(t, dim, keepdim=False):
-    return msMin(t, axis=dim, keepdims=keepdim)
-
-def maxTensor(t, dim, keepdim=False):
-    return msMax(t, axis=dim, keepdims=keepdim)
-
-
-# from torch import Tensor,  uint8
-# import torch
-# from torch import clamp, round, div, bitwise_or, stack, mul
-
-# def toNumpy(a):
-#     return a.numpy()
+# from mindspore import Tensor, dtype
+# from mindspore.ops import min as msMin
+# from mindspore.ops import max as msMax
+# from mindspore.ops import clamp, mul,  round, bitwise_or, stack, div
+# uint8 = dtype.uint8
 
 # def minTensor(t, dim, keepdim=False):
-#     return torch.min(t, dim=dim, keepdim=keepdim)
+#     return msMin(t, axis=dim, keepdims=keepdim)
+
 # def maxTensor(t, dim, keepdim=False):
-#     return torch.max(t, dim=dim, keepdim=keepdim)
+#     return msMax(t, axis=dim, keepdims=keepdim)
 
 
+from torch import Tensor,  uint8
+import torch
+from torch import clamp, round, div, bitwise_or, stack, mul
+
+def toNumpy(a):
+    return a.numpy()
+
+def minTensor(t, dim, keepdim=False):
+    return torch.min(t, dim=dim, keepdim=keepdim)
+def maxTensor(t, dim, keepdim=False):
+    return torch.max(t, dim=dim, keepdim=keepdim)
 
 
 import numpy as np

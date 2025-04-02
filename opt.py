@@ -96,7 +96,6 @@ class Attention:
         attentionMask in shape: (B, s)
         """
         global cnt
-        torch.save(x, f"comp/my/attnIn.{cnt}")
 
         b, s, h = x.shape
         self.kCache = FlexTensor(self.name+".kcache", (b,self.config.maxSeqLen, h))
@@ -111,16 +110,12 @@ class Attention:
         # make a casual mask and combine it with attention mask
         mhaOut = mha_prefill(q, k, v, attentionMask, self.numHead) 
         
-        torch.save(mhaOut, f"comp/my/mha.{cnt}")
 
         attnOut = self.outProj(mhaOut)
 
-        torch.save(attnOut, f"comp/my/outProj.{cnt}")
 
         attnOut = attnOut + x
         
-        torch.save(attnOut, f"comp/my/residual.{cnt}")
-        torch.save(attnOut, f"comp/my/attn.{cnt}")
         cnt = cnt+1
 
         return attnOut
@@ -263,7 +258,6 @@ class InputEmbed:
         embed = tokenEmbed + posEmbed
         
         assert len(embed.shape) == 3
-        torch.save(embed, "comp/my/inputEmbed")
         return embed
 
 class OutputEmbed:
@@ -430,7 +424,12 @@ class OPT:
         
         self.hidden[0].store(inputIDs)
         
-        self.coreLoops(i)
+        if i == 0:
+            timers("prefill").start()   
+            self.coreLoops(i)
+            timers("prefill").stop()
+        else:
+            self.coreLoops(i)
         
         self.tokensBuffer = torch.concat([self.tokensBuffer, self.hidden[-1].val.unsqueeze(1)], axis=1)
         self.attentionMask = torch.concat(
@@ -446,7 +445,7 @@ class OPT:
         
         print(">>> inference begin")
         for i in range(numIter):
-            print(f"    >>> loop {i} begin")
+            print(f" >>> inference iter {i+1}/{numIter}")
             self.singleToken(i, promptLen+i)
             
         print("<<< inference end")
@@ -472,19 +471,21 @@ if __name__ == "__main__":
     parser.add_argument("--compress", action="store_true")
     parser.add_argument("--interact", action="store_true")
     parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--logfile", type=str, default="defaultLog")
 
     args = parser.parse_args()
 
     config = getOptConfig(args.model)
     config.weightFname = args.ckpt
     config.tokenizer = args.tokenizer
+    logFile = args.logfile
 
     if args.offload:
         FlexTensor.offload = True
     if args.prefetch:
         OPT.prefetch = True
     if args.compress:
-        FlexTensor.setCompess(True)
+        FlexTensor.setCompress(True)
 
     testBatchSize = args.batch_size
     numIter = 10
@@ -524,16 +525,20 @@ if __name__ == "__main__":
 
     if args.interact:
         while True:
-            sentence = input(" >>> plase input the question\n >>> xxx to quit\n")
+            sentence = input(" >>> plase input the question\n"
+                             ">>> xxx to quit\n")
             if sentence == "xxx":
                 break
             outputs = model.run([sentence], 32, 32)
             for s in outputs:
                 print(s)
 
-    print(utils.report(inferenceTime=inferenceTime,loadTime=loadTime, batchSize=args.batch_size, numIter=numIter))
+    prefillTime = timers("prefill").elapsed() / testBatchSize
+    decodeTime = (timers("prefill").elapsed() - prefillTime) / testBatchSize
+    throughtput = testBatchSize * numIter / inferenceTime 
+    print(utils.report(inferenceTime=inferenceTime,loadTime=loadTime, batchSize=args.batch_size, prefillTime=prefillTime, decodeTime=decodeTime, throughput=throughtput))
 
-    with open("default_log", "a+") as f:
+    with open(logFile, "a+") as f:
         r = utils.report(banner="OPT run",
                          model=config.modelName, 
                          prefetch=args.prefetch, 
@@ -545,6 +550,10 @@ if __name__ == "__main__":
                             hiddenSize=hiddenSize,
                             loadTime=loadTime,
                             inferenceTime=inferenceTime,
-                            numIter=numIter
+                            prefillTime=prefillTime,
+                            throughput=throughtput
         )
         f.write(r)
+
+    FlexTensor.clear()
+

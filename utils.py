@@ -106,8 +106,10 @@ def report(banner=None,
            loadTime=None, 
            inferenceTime=None, 
            perTokenTime=None,
+           prefillTime=None,
+           decodeTime=None,
            throughput=None):
-    r = f"\n {'>>>'*6} {banner} {'<<<' * 6}" \
+    r = f"\n {'>>>'*6} {banner} {'<<<' * 6}\n" \
         if banner is not None \
         else ""
 
@@ -123,18 +125,15 @@ def report(banner=None,
     ):
         if s is not None:
             r += f" >>> {tag}: {s / GB:.3f}GB\n"
-        
-    if inferenceTime is not None:
-        r += f" >>> inference-time: {prettyTime(inferenceTime)}\n"
     
-    if perTokenTime is not None:
-        r += f" >>> per-token: {prettyTime(perTokenTime)}\n"
+    for tag, t in zip(
+        ["prefillTime", "per-token", "decodeTime"],
+        [prefillTime, perTokenTime, decodeTime]
+    ):
+        if t is not None:
+            r += f" >>> {tag}: {prettyTime(t)}\n"
 
     if throughput is not None:
         r += f" >>> throughput : {throughput:.4f} token/s\n"
-
-    
-
-    
 
     return r

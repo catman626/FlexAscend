@@ -62,7 +62,7 @@ class DiskTensor:
         t = Tensor(t)
         
         if DiskTensor.compress:
-            extra = torch.load(self.filename + ".extra.npy") 
+            extra = torch.load(self.filename + ".extra") 
 
             self.cached = decompress(t, extra, self.shape)
         else:
@@ -76,6 +76,11 @@ class DiskTensor:
 
         self.load()
         return self.data()
+
+    @staticmethod
+    def clear():
+        for f in os.listdir(DiskTensor.weightHome):
+            os.remove(os.path.join(DiskTensor.weightHome, f))
         
 class FlexTensor:
     def __init__(self, name, shape=None, home:str="DISK"):
@@ -84,13 +89,15 @@ class FlexTensor:
         self.home = home    # where the data is stored, Ascend or CPU, DISK
         
         if self.home == "Ascend":
-            self.tensor = AscendTensor()
+            self.tensorCls = AscendTensor
         elif self.home == "CPU":
-            self.tensor = CPUTensor()
+            self.tensorCls = CPUTensor
         elif self.home == "DISK":
-            self.tensor = DiskTensor(self.name)
+            self.tensorCls = DiskTensor
         else:
             raise NotImplementedError(f"not implemented home: {self.home}")
+
+        self.tensor = self.tensorCls(self.name)
 
     def store(self, data:Tensor):
         self.tensor.store(data)
@@ -103,6 +110,15 @@ class FlexTensor:
 
     def initZeros(self):
         return self.tensor.store(Tensor(np.zeros(self.shape, dtype=np.float32)))
+
+    @staticmethod
+    def setCompress(compress:bool):
+        DiskTensor.compress = compress
+
+    @staticmethod
+    def clear():
+        DiskTensor.clear()
+        
 
 def batchMatMul(A, B, transposeA=False, transposeB=False):
     Ad = A.data()
@@ -138,9 +154,6 @@ def mha_prefill(q:Tensor, k:Tensor, v:Tensor, attentionMask:Tensor, numHead:int)
     q = q * scaling
 
     global cnt
-    torch.save(q, f"comp/my/q.{cnt}")
-    torch.save(k, f"comp/my/k.{cnt}")
-    torch.save(v, f"comp/my/v.{cnt}")
     cnt+=1
 
     # (b, s, nh, h1)
