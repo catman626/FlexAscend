@@ -13,7 +13,7 @@ from utils import peekTensor
 cnt=0
 
 class AscendTensor:
-    def __init__(self):
+    def __init__(self, name):
         self.val = None
     
     def store(self, data:Tensor):
@@ -21,9 +21,26 @@ class AscendTensor:
         
     def data(self):
         return self.val
+
+    def load(self):
+        pass    
+
+class GPUTensor:
+    def __init__(self, name):
+        self.val = None
+    
+    def store(self, data:Tensor):
+        self.val = data
+        
+    def data(self):
+        return self.val
+
+    def load(self):
+        pass
+        
         
 class CPUTensor:
-    def __init__(self):
+    def __init__(self, name):
         self.val = None
         
     def store(self, data:Tensor):
@@ -31,6 +48,9 @@ class CPUTensor:
 
     def data(self):
         return self.val
+
+    def load(self):
+        pass
     
 class DiskTensor:
     weightHome = "weightHome"
@@ -83,13 +103,16 @@ class DiskTensor:
             os.remove(os.path.join(DiskTensor.weightHome, f))
         
 class FlexTensor:
-    def __init__(self, name, shape=None, home:str="DISK"):
+    def __init__(self, name, shape=None, home=None):
+    # def __init__(self, name, shape=None, home:str="GPU"):
         self.shape = shape
         self.name = name
         self.home = home    # where the data is stored, Ascend or CPU, DISK
         
         if self.home == "Ascend":
             self.tensorCls = AscendTensor
+        if self.home == "GPU":
+            self.tensorCls = GPUTensor
         elif self.home == "CPU":
             self.tensorCls = CPUTensor
         elif self.home == "DISK":

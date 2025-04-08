@@ -23,12 +23,13 @@ from config import OptConfig, getOptConfig
 cnt = 0
 
 class Linear:
-    def __init__(self, name, inputChannel:int, outputChannel:int):
+    def __init__(self, name, inputChannel:int, outputChannel:int, weightHome:str):
         self.name = name
         self.inchannel = inputChannel
         self.outchannel = outputChannel
-        self.weight : FlexTensor = FlexTensor(name+".weight", (outputChannel, inputChannel))
-        self.bias   : FlexTensor = FlexTensor(name+".bias", (outputChannel))
+        self.weightHome = weightHome
+        self.weight : FlexTensor = FlexTensor(name+".weight", (outputChannel, inputChannel), weightHome)
+        self.bias   : FlexTensor = FlexTensor(name+".bias", (outputChannel, ), weightHome)
 
     def __call__(self, x:FlexTensor):
         return F.linear(x, self.weight.data(), self.bias.data())
@@ -41,10 +42,10 @@ class Linear:
         self.bias.load()
 
 class Layernorm:
-    def __init__(self, name, normDim:int):
+    def __init__(self, name, normDim:int, weightHome):
         self.name = name
-        self.weight = FlexTensor(name+".weight", (normDim, ))
-        self.bias   = FlexTensor(name+".bias", (normDim, ))
+        self.weight = FlexTensor(name+".weight", (normDim, ), weightHome)
+        self.bias   = FlexTensor(name+".bias", (normDim, ), weightHome)
         self.normDim = normDim
 
     def __call__(self, x:Tensor):
@@ -70,12 +71,28 @@ class Attention:
         self.seqLength = config.maxSeqLen
         hiddenSize = config.hiddenSize
         self.numHead = config.numHead
+        self.weightHome = "DISK" \
+            if "w" in config.offload \
+            else "GPU"
+        self.cacheHome = "DISK" \
+            if "c" in config.offload \
+            else "GPU"
         
-        self.qProj      = Linear(self.name+".qProj", hiddenSize, hiddenSize)
-        self.kProj      = Linear(self.name+".kProj", hiddenSize, hiddenSize)
-        self.vProj      = Linear(self.name+".vProj", hiddenSize, hiddenSize)
-        self.outProj    = Linear(self.name+".outProj", hiddenSize, hiddenSize)
-        self.layernorm  = Layernorm(name+".layernorm", normDim=hiddenSize)
+        self.qProj      = Linear(self.name+".qProj", 
+                                 hiddenSize, hiddenSize, 
+                                 self.weightHome)
+        self.kProj      = Linear(self.name+".kProj", 
+                                 hiddenSize, hiddenSize, 
+                                 self.weightHome)
+        self.vProj      = Linear(self.name+".vProj", 
+                                 hiddenSize, hiddenSize, 
+                                 self.weightHome)
+        self.outProj    = Linear(self.name+".outProj", 
+                                 hiddenSize, hiddenSize, 
+                                 self.weightHome)
+        self.layernorm  = Layernorm(name+".layernorm", 
+                                    normDim=hiddenSize,
+                                    weightHome=self.weightHome)
 
     def getParameters(self):
         return {
@@ -98,8 +115,12 @@ class Attention:
         global cnt
 
         b, s, h = x.shape
-        self.kCache = FlexTensor(self.name+".kcache", (b,self.config.maxSeqLen, h))
-        self.vCache = FlexTensor(self.name+".vcache", (b,self.config.maxSeqLen, h))
+        self.kCache = FlexTensor(self.name+".kcache", 
+                                 (b,self.config.maxSeqLen, h),
+                                 self.cacheHome)
+        self.vCache = FlexTensor(self.name+".vcache", 
+                                 (b,self.config.maxSeqLen, h),
+                                 self.cacheHome)
 
         normalX = self.layernorm(x)
 
@@ -163,11 +184,14 @@ class FeedForward:
         self.name = name
         hiddenSize = config.hiddenSize
         ffnHiddenSize = config.ffnHiddenSize
+        weightHome = "DISK" \
+            if config.offload == "weight" \
+            else "GPU"
         
-        self.layernorm = Layernorm(name+".layernorm", normDim=hiddenSize)
-        self.linear1 = Linear(name+".linear1", hiddenSize, ffnHiddenSize)
+        self.layernorm = Layernorm(name+".layernorm", normDim=hiddenSize, weightHome=weightHome)
+        self.linear1 = Linear(name+".linear1", hiddenSize, ffnHiddenSize, weightHome)
         self.relu = torch.nn.ReLU()
-        self.linear2 = Linear(name+".linear2", ffnHiddenSize, hiddenSize)
+        self.linear2 = Linear(name+".linear2", ffnHiddenSize, hiddenSize, weightHome)
 
     def getParameters(self):
         return {
@@ -219,10 +243,16 @@ class InputEmbed:
     #inputembed
     def __init__(self, config:OptConfig):
         super().__init__()
+        self.tensorHome = "DISK" \
+            if config.offload == "weight" \
+            else "GPU"
+            
         self.tokenEmbedWeight = FlexTensor("inputEmbed.tokenWeight", 
-                                           (config.vocabSize, config.hiddenSize))
+                                           (config.vocabSize, config.hiddenSize), self.tensorHome)
         self.posEmbedWeight = FlexTensor("inputEmbed.posWeight",
-                                         (config.maxSeqLen + 2, config.hiddenSize))
+                                         (config.maxSeqLen + 2, config.hiddenSize),
+                                         self.tensorHome)
+
 
     def getParameters(self):
         return { self.tokenEmbedWeight, self.posEmbedWeight }
@@ -264,9 +294,18 @@ class OutputEmbed:
     #outputembed
     def __init__(self, config:OptConfig):
         super().__init__()
-        self.tokenWeight = FlexTensor(shape=(config.vocabSize, config.hiddenSize), name="outputEmbed.tokenWeight")
+        self.tensorHome = "GPU" \
+            if config.offload == "weight" \
+            else "DISK"
         
-        self.layernorm = Layernorm("outputEmbed.layernorm", config.hiddenSize)    
+
+        self.tokenWeight = FlexTensor(shape=(config.vocabSize, config.hiddenSize), 
+                                    name="outputEmbed.tokenWeight", 
+                                    home=self.tensorHome)
+        
+        self.layernorm = Layernorm("outputEmbed.layernorm", 
+                                   config.hiddenSize, 
+                                   weightHome=self.tensorHome)    
 
     def getParameters(self):
         return {
@@ -466,7 +505,7 @@ if __name__ == "__main__":
     parser.add_argument("--ckpt", nargs="*", help="list all ckpt files")
     parser.add_argument("--tokenizer", type=str, default="/home/ma-user/work/FlexAscend/model/opt-1.3b")
     parser.add_argument("--model", type=str, required=True)
-    parser.add_argument("--offload", type=str, default="GPU")
+    parser.add_argument("--offload", default="")
     parser.add_argument("--prefetch", action="store_true")
     parser.add_argument("--compress", action="store_true")
     parser.add_argument("--interact", action="store_true")
