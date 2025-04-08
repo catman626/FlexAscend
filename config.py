@@ -32,10 +32,25 @@ def getOptConfig(name)->OptConfig:
         config = OptConfig(name=name,
             maxSeqLen=2048, numHiddenLayer=24, nHead=32,
             hiddenSize=2048, inputDim=2048, ffnEmbedDim=2048 * 4,)
+    elif name == "opt-2.7b":
+        config = OptConfig(name=name,
+            maxSeqLen=2048, numHiddenLayers=32, nHead=32,
+            hiddenSize=2560, inputDim=2560, ffnEmbedDim=2560 * 4,
+        )
     elif name == "opt-6.7b":
         config = OptConfig(name=name,
             maxSeqLen=2048, numHiddenLayer=32, nHead=32,
             hiddenSize=4096, inputDim=4096, ffnEmbedDim=4096 * 4,
+        )
+    elif name == "opt-13b":
+        config = OptConfig(name=name,
+            maxSeqLen=2048, numHiddenLayers=40, nHead=40,
+            hiddenSize=5120, inputDim=5120, ffnEmbedDim=5120 * 4,
+        )
+    elif name == "opt-30b":
+        config = OptConfig(name=name,
+            maxSeqLen=2048, numHiddenLayers=48, nHead=56,
+            hiddenSize=7168, inputDim=7168, ffnEmbedDim=7168 * 4,
         )
     elif name == "opt-66b":
         config = OptConfig(name=name,

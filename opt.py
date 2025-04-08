@@ -466,7 +466,7 @@ if __name__ == "__main__":
     parser.add_argument("--ckpt", nargs="*", help="list all ckpt files")
     parser.add_argument("--tokenizer", type=str, default="/home/ma-user/work/FlexAscend/model/opt-1.3b")
     parser.add_argument("--model", type=str, required=True)
-    parser.add_argument("--offload", action="store_true")
+    parser.add_argument("--offload", type=str, default="GPU")
     parser.add_argument("--prefetch", action="store_true")
     parser.add_argument("--compress", action="store_true")
     parser.add_argument("--interact", action="store_true")
@@ -478,10 +478,10 @@ if __name__ == "__main__":
     config = getOptConfig(args.model)
     config.weightFname = args.ckpt
     config.tokenizer = args.tokenizer
+    config.offload = args.offload
+
     logFile = args.logfile
 
-    if args.offload:
-        FlexTensor.offload = True
     if args.prefetch:
         OPT.prefetch = True
     if args.compress:
