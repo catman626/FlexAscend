@@ -66,6 +66,16 @@ def integerType(t):
         torch.int64
     }
 
+def elementSize(t):
+    if t == torch.float16:
+        return 2
+    elif t == torch.float32:
+        return 4
+    elif t == torch.float64:
+        return 8
+    else:
+        raise NotImplementedError(f"unsupported type: {t}")   
+
 def peekTensor(t, prompt):
     print(f"{prompt} {t}")
     
@@ -81,18 +91,16 @@ def model_bytes(config: OptConfig):
     # embedding
     config.vocabSize * (h + 1))
 
-    return nelement * 2
+    return nelement * elementSize(config.dtype)
 
 def cache_bytes(config:OptConfig, batchSize, seqLen):
     # assuming float16
     nelement = config.numHiddenLayer * seqLen * batchSize * config.inputDim * 2
-    return nelement * 2
+    return nelement * elementSize(config.dtype)
 
 def hidden_bytes(config:OptConfig, batchSize, seqLen):
     # assuming float16
-    return batchSize * seqLen * config.inputDim * 2
-
-    
+    return batchSize * seqLen * config.inputDim * elementSize(config.dtype)
 
 def report(banner=None, 
            model=None, 

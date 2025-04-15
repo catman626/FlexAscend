@@ -31,7 +31,7 @@ def replaceName(name:str):
 
     return name
     
-def main(torchCkpt, mindsporeCkpt):
+def main(torchCkpt, convertedCkpt):
     print(">>> load weight begin")
     torchWeight = torch.load(torchCkpt)
     print("<<< load weight finished")
@@ -49,11 +49,12 @@ def main(torchCkpt, mindsporeCkpt):
     torchDict = dict()
     for item in mindsporeWeight:
         torchDict[item['name']] = item['data']
-    torch.save(torchDict, mindsporeCkpt)
+    torch.save(torchDict, convertedCkpt)
 
 import argparse
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(epilog="python original.bin converted.bin")
+    
     parser.add_argument("torchckpt", type=str)
     parser.add_argument("mindsporeckpt", type=str)
 

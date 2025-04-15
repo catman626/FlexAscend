@@ -30,6 +30,8 @@ class GPUTensor:
         self.val = None
     
     def store(self, data:Tensor):
+        if data.device != "cuda":
+            data = data.to("cuda")
         self.val = data
         
     def data(self):
@@ -44,6 +46,11 @@ class CPUTensor:
         self.val = None
         
     def store(self, data:Tensor):
+        if data.device.type != "cpu":
+            self.val = data.to("cpu")
+            del data
+            return 
+            
         self.val = data
 
     def data(self):
@@ -55,6 +62,7 @@ class CPUTensor:
 class DiskTensor:
     weightHome = "weightHome"
     compress = False
+    pass
     def __init__(self, name:str):
         self.name = name
         self.filename = None
@@ -99,12 +107,14 @@ class DiskTensor:
 
     @staticmethod
     def clear():
+        if not os.path.exists(DiskTensor.weightHome):
+            return  
+
         for f in os.listdir(DiskTensor.weightHome):
             os.remove(os.path.join(DiskTensor.weightHome, f))
         
 class FlexTensor:
     def __init__(self, name, shape=None, home=None):
-    # def __init__(self, name, shape=None, home:str="GPU"):
         self.shape = shape
         self.name = name
         self.home = home    # where the data is stored, Ascend or CPU, DISK
@@ -141,7 +151,6 @@ class FlexTensor:
     @staticmethod
     def clear():
         DiskTensor.clear()
-        
 
 def batchMatMul(A, B, transposeA=False, transposeB=False):
     Ad = A.data()
@@ -154,7 +163,10 @@ def batchMatMul(A, B, transposeA=False, transposeB=False):
     return torch.bmm(Ad, Bd)
 
 
-def layernorm(x:FlexTensor, normalizedShape:FlexTensor, weight:FlexTensor, bias:FlexTensor):
+def layernorm(x:FlexTensor, 
+              normalizedShape:FlexTensor, 
+              weight:FlexTensor, 
+              bias:FlexTensor):
     return F.layer_norm(x.data(), normalizedShape, weight.data(), bias.data())
 
 def batchMatMul(x:FlexTensor, y:FlexTensor):
@@ -165,7 +177,6 @@ def argmax(x:FlexTensor):
 
 def sqrt(x):
     return x ** -0.5
-
 
 def mha_prefill(q:Tensor, k:Tensor, v:Tensor, attentionMask:Tensor, numHead:int):
     b, s, h = q.shape
@@ -195,7 +206,7 @@ def mha_prefill(q:Tensor, k:Tensor, v:Tensor, attentionMask:Tensor, numHead:int)
 
     # mask
     assert attentionMask.shape == (b, s) 
-    ids = torch.arange(0, s)
+    ids = torch.arange(0, s, device=q.device)
     casualMask = ids <= ids.view(s, 1)
     mask = casualMask.view(1, 1, s, s) & attentionMask.view(b, 1, 1, s)
     # peekTensor(mask, " >>> mask")
@@ -234,6 +245,11 @@ def mha_decode(q:Tensor, k:Tensor, v:Tensor, attentionMask:Tensor, numHead:int) 
     q = q.permute(0, 2, 1, 3).reshape(b*numHead, 1, headDim)
     k = k.permute(0, 2, 3, 1).reshape(b*numHead, headDim, s)
     v = v.permute(0, 2, 1, 3).reshape(b*numHead, s, headDim)
+
+    assert q.device.type == "cuda"
+    assert k.device.type == "cuda"
+    assert v.device.type == "cuda"
+    assert attentionMask.device.type == "cuda"
 
     # output shape (b*nh, 1, s)
     score = torch.bmm(q, k)

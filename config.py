@@ -1,4 +1,4 @@
-from mindspore import dtype
+import torch
 
 class OptConfig:
     def __init__(self, name,
@@ -6,7 +6,7 @@ class OptConfig:
             hiddenSize, inputDim, ffnEmbedDim,
         ):
         self.modelName = name
-        self.dtype = dtype.float32
+        self.dtype = torch.float32
         self.hasBias = True
         self.maxSeqLen= maxSeqLen
         self.inputDim = inputDim
@@ -34,7 +34,7 @@ def getOptConfig(name)->OptConfig:
             hiddenSize=2048, inputDim=2048, ffnEmbedDim=2048 * 4,)
     elif name == "opt-2.7b":
         config = OptConfig(name=name,
-            maxSeqLen=2048, numHiddenLayers=32, nHead=32,
+            maxSeqLen=2048, numHiddenLayer=32, nHead=32,
             hiddenSize=2560, inputDim=2560, ffnEmbedDim=2560 * 4,
         )
     elif name == "opt-6.7b":
@@ -44,12 +44,12 @@ def getOptConfig(name)->OptConfig:
         )
     elif name == "opt-13b":
         config = OptConfig(name=name,
-            maxSeqLen=2048, numHiddenLayers=40, nHead=40,
+            maxSeqLen=2048, numHiddenLayer=40, nHead=40,
             hiddenSize=5120, inputDim=5120, ffnEmbedDim=5120 * 4,
         )
     elif name == "opt-30b":
         config = OptConfig(name=name,
-            maxSeqLen=2048, numHiddenLayers=48, nHead=56,
+            maxSeqLen=2048, numHiddenLayer=48, nHead=56,
             hiddenSize=7168, inputDim=7168, ffnEmbedDim=7168 * 4,
         )
     elif name == "opt-66b":
