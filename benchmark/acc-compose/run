@@ -1,0 +1,8 @@
+FLEX_HOME="/home/catman/FlexAscend"
+FLEX_SCRIPT=$FLEX_HOME/"opt.py"
+
+## 13b
+python $FLEX_SCRIPT --model opt-125m --tokenizer $FLEX_HOME/model/opt-125m \
+    --input-file modelInput \
+    --output-file modelOutput 
+

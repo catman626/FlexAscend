@@ -16,7 +16,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import argparse
 
 USING_DISK=False
-DUMMY_WEIGHT=True
+DUMMY_WEIGHT=False
 
 class Config:
     def __init__(self, name,
@@ -208,8 +208,8 @@ class Linear:
 class Layernorm:
     def __init__(self, name, normDim:int):
         self.name = name
-        self.weight = FlexTensor(name+".weight", (normDim, ))
-        self.bias = FlexTensor(name+".bias", (normDim, ))
+        self.weight = FlexTensor(name+".gamma", (normDim, ))
+        self.bias = FlexTensor(name+".beta", (normDim, ))
         self.normDim = normDim
 
     def __call__(self, x:Tensor):
@@ -238,7 +238,7 @@ class Attention(nn.Cell):
         self.vProj = Linear(self.name+".vProj", hiddenSize, hiddenSize)
         self.outProj = Linear(self.name+".outProj", hiddenSize, hiddenSize)
 
-        self.layernorm = Layernorm(name+".layernorm", normDim=hiddenSize)
+        self.layernorm = Layernorm(name+".attnLayerNorm", normDim=hiddenSize)
 
         self.batchMatMul = ops.BatchMatMul()    # transpose handled in construct:premute
         self.softmax = nn.Softmax()
@@ -327,7 +327,7 @@ class FeedForward(nn.Cell):
         hiddenSize = config.hiddenSize
         ffnHiddenSize = config.ffnHiddenSize
         
-        self.layernorm = Layernorm(name+".layernorm", normDim=hiddenSize)
+        self.layernorm = Layernorm(name+".layerNorm", normDim=hiddenSize)
         self.linear1 = Linear(name+".linear1", hiddenSize, ffnHiddenSize)
         self.relu = nn.ReLU()
         self.linear2 = Linear(name+".linear2", ffnHiddenSize, hiddenSize)
@@ -383,8 +383,8 @@ class InputEmbed(nn.Cell):
     #inputembed
     def __init__(self, config:Config):
         super().__init__()
-        self.tokenEmbedWeight = FlexTensor(shape=(config.vocabSize, config.hiddenSize), name="inputEmbed.tokenWeight")
-        self.posEmbedWeight = FlexTensor(shape=(config.maxSeqLen + 2, config.hiddenSize), name="inputEmbed.posWeight")
+        self.tokenEmbedWeight = FlexTensor(shape=(config.vocabSize, config.hiddenSize), name="inputEmbed.tokenEmbedWeight")
+        self.posEmbedWeight = FlexTensor(shape=(config.maxSeqLen + 2, config.hiddenSize), name="inputEmbed.posEmbedWeight")
         self.gather = ops.operations.Gather()
         self.add = ops.Add()
 
@@ -432,7 +432,7 @@ class OutputEmbed(nn.Cell):
         #                          gamma_init=lazyParameter(shape=(config.hiddenSize, ), name="output_embed_layer_norm.weight"),
         #                          beta_init=lazyParameter(shape=(config.hiddenSize), name="output_embed_layer_norm.bias"), 
         #                          dtype=dtype.float32)
-        self.layernorm = Layernorm("outputEmbed.layernorm", config.hiddenSize)    
+        self.layernorm = Layernorm("outputEmbed.norm", config.hiddenSize)    
         self.matmul = ops.BatchMatMul(transpose_b=True)
         self.argmax = ops.Argmax()
 

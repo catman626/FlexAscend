@@ -1,0 +1,308 @@
+
+ >>>>>>>>>>>>>>>>>> OPT run <<<<<<<<<<<<<<<<<<
+ >>> model: opt-13b
+ >>> prefetch: False
+ >>> offload: 
+ >>> batchSize: 32
+ >>> compress: False
+ >>> loadTime: 0.21182935126125813
+ >>> inferenceTime: 14.322425998281687
+ >>> modelSize: 23.921GB
+ >>> cacheSize: 0.449GB
+ >>> hiddenSize: 0.006GB
+ >>> prefillTime: 0.24001276581839193s
+ >>> throughput : 22.3426 token/s
+
+ >>>>>>>>>>>>>>>>>> OPT run <<<<<<<<<<<<<<<<<<
+ >>> model: opt-13b
+ >>> prefetch: False
+ >>> offload: 
+ >>> batchSize: 32
+ >>> compress: False
+ >>> loadTime: 0.21487486083060503
+ >>> inferenceTime: 14.473834343254566
+ >>> modelSize: 23.921GB
+ >>> cacheSize: 0.449GB
+ >>> hiddenSize: 0.006GB
+ >>> prefillTime: 0.2433639705996029s
+ >>> throughput : 22.1089 token/s
+
+ >>>>>>>>>>>>>>>>>> OPT run <<<<<<<<<<<<<<<<<<
+ >>> model: opt-30b
+ >>> prefetch: False
+ >>> offload: 
+ >>> batchSize: 32
+ >>> compress: False
+ >>> loadTime: 0.2186828525736928
+ >>> inferenceTime: 26.68866750691086
+ >>> modelSize: 55.803GB
+ >>> cacheSize: 0.755GB
+ >>> hiddenSize: 0.008GB
+ >>> prefillTime: 0.4575383131596027s
+ >>> throughput : 11.9901 token/s
+
+ >>>>>>>>>>>>>>>>>> OPT run <<<<<<<<<<<<<<<<<<
+ >>> model: opt-30b
+ >>> prefetch: False
+ >>> offload: w
+ >>> batchSize: 32
+ >>> compress: False
+ >>> loadTime: 69.07069625006989
+ >>> inferenceTime: 245.74748526420444
+ >>> modelSize: 55.803GB
+ >>> cacheSize: 0.755GB
+ >>> hiddenSize: 0.008GB
+ >>> prefillTime: 1.0851919913402526s
+ >>> throughput : 1.3021 token/s
+
+ >>>>>>>>>>>>>>>>>> OPT run <<<<<<<<<<<<<<<<<<
+ >>> model: opt-175b
+ >>> prefetch: False
+ >>> offload: 
+ >>> batchSize: 32
+ >>> compress: False
+ >>> loadTime: 0.24304510187357664
+ >>> inferenceTime: 143.92264276510105
+ >>> modelSize: 325.175GB
+ >>> cacheSize: 2.587GB
+ >>> hiddenSize: 0.013GB
+ >>> prefillTime: 2.410858499002643s
+ >>> throughput : 2.2234 token/s
+
+ >>>>>>>>>>>>>>>>>> OPT run <<<<<<<<<<<<<<<<<<
+ >>> model: opt-175b
+ >>> prefetch: False
+ >>> offload: 
+ >>> batchSize: 32
+ >>> compress: False
+ >>> loadTime: 0.241854349616915
+ >>> inferenceTime: 141.5154735678807
+ >>> modelSize: 325.175GB
+ >>> cacheSize: 2.587GB
+ >>> hiddenSize: 0.013GB
+ >>> prefillTime: 2.3346058055903995s
+ >>> throughput : 2.2612 token/s
+
+ >>>>>>>>>>>>>>>>>> OPT run <<<<<<<<<<<<<<<<<<
+ >>> model: opt-175b
+ >>> prefetch: False
+ >>> offload: 
+ >>> batchSize: 32
+ >>> compress: False
+ >>> loadTime: 0.244863694999367
+ >>> inferenceTime: 141.30768270697445
+ >>> modelSize: 325.175GB
+ >>> cacheSize: 2.587GB
+ >>> hiddenSize: 0.013GB
+ >>> prefillTime: 2.334778732867562s
+ >>> throughput : 2.2646 token/s
+
+ >>>>>>>>>>>>>>>>>> OPT run <<<<<<<<<<<<<<<<<<
+ >>> model: opt-2.7b
+ >>> prefetch: False
+ >>> offload: 
+ >>> batchSize: 1
+ >>> compress: False
+ >>> loadTime: 4.922784117050469
+ >>> inferenceTime: 1.1816307320259511
+ >>> modelSize: 9.858GB
+ >>> cacheSize: 0.011GB
+ >>> hiddenSize: 0.000GB
+ >>> prefillTime: 0.7419762299396098s
+ >>> throughput : 8.4629 token/s
+
+ >>>>>>>>>>>>>>>>>> OPT run <<<<<<<<<<<<<<<<<<
+ >>> model: opt-2.7b
+ >>> prefetch: False
+ >>> offload: 
+ >>> batchSize: 256
+ >>> compress: False
+ >>> loadTime: 4.818247825838625
+ >>> inferenceTime: 5.984605168923736
+ >>> modelSize: 9.858GB
+ >>> cacheSize: 2.875GB
+ >>> hiddenSize: 0.045GB
+ >>> prefillTime: 0.010559715683484683s
+ >>> throughput : 427.7642 token/s
+
+ >>>>>>>>>>>>>>>>>> OPT run <<<<<<<<<<<<<<<<<<
+ >>> model: opt-2.7b
+ >>> prefetch: False
+ >>> offload: w
+ >>> batchSize: 256
+ >>> compress: False
+ >>> loadTime: 13.35521329799667
+ >>> inferenceTime: 19.215263065882027
+ >>> modelSize: 9.858GB
+ >>> cacheSize: 2.875GB
+ >>> hiddenSize: 0.045GB
+ >>> prefillTime: 0.013056074176347465s
+ >>> throughput : 133.2274 token/s
+
+ >>>>>>>>>>>>>>>>>> OPT run <<<<<<<<<<<<<<<<<<
+ >>> model: opt-2.7b
+ >>> prefetch: False
+ >>> offload: w
+ >>> batchSize: 512
+ >>> compress: False
+ >>> loadTime: 13.678676513954997
+ >>> inferenceTime: 21.774439450353384
+ >>> modelSize: 9.858GB
+ >>> cacheSize: 5.750GB
+ >>> hiddenSize: 0.090GB
+ >>> prefillTime: 0.010129707980013336s
+ >>> throughput : 235.1381 token/s
+
+ >>>>>>>>>>>>>>>>>> OPT run <<<<<<<<<<<<<<<<<<
+ >>> model: opt-2.7b
+ >>> prefetch: False
+ >>> offload: w
+ >>> batchSize: 256
+ >>> compress: False
+ >>> loadTime: 8.127522772178054
+ >>> inferenceTime: 19.000849501695484
+ >>> modelSize: 9.858GB
+ >>> cacheSize: 2.875GB
+ >>> hiddenSize: 0.045GB
+ >>> prefillTime: 0.012564789682073751s
+ >>> throughput : 134.7308 token/s
+
+ >>>>>>>>>>>>>>>>>> OPT run <<<<<<<<<<<<<<<<<<
+ >>> model: opt-2.7b
+ >>> prefetch: False
+ >>> offload: w
+ >>> batchSize: 256
+ >>> compress: False
+ >>> loadTime: 3.819575058761984
+ >>> inferenceTime: 10.970165900886059
+ >>> modelSize: 9.858GB
+ >>> cacheSize: 2.875GB
+ >>> hiddenSize: 0.045GB
+ >>> prefillTime: 0.014006628220158746s
+ >>> throughput : 233.3602 token/s
+
+ >>>>>>>>>>>>>>>>>> OPT run <<<<<<<<<<<<<<<<<<
+ >>> model: opt-2.7b
+ >>> prefetch: False
+ >>> offload: w
+ >>> batchSize: 512
+ >>> compress: False
+ >>> loadTime: 3.816370890941471
+ >>> inferenceTime: 15.168235888238996
+ >>> modelSize: 9.858GB
+ >>> cacheSize: 5.750GB
+ >>> hiddenSize: 0.090GB
+ >>> prefillTime: 0.010742750493591302s
+ >>> throughput : 337.5475 token/s
+
+ >>>>>>>>>>>>>>>>>> OPT run <<<<<<<<<<<<<<<<<<
+ >>> model: opt-2.7b
+ >>> prefetch: False
+ >>> offload: wc
+ >>> batchSize: 1024
+ >>> compress: False
+ >>> loadTime: 3.8120913081802428
+ >>> inferenceTime: 98.56030887039378
+ >>> modelSize: 9.858GB
+ >>> cacheSize: 11.500GB
+ >>> hiddenSize: 0.180GB
+ >>> prefillTime: 0.014172651492117438s
+ >>> throughput : 103.8958 token/s
+
+ >>>>>>>>>>>>>>>>>> OPT run <<<<<<<<<<<<<<<<<<
+ >>> model: opt-2.7b
+ >>> prefetch: False
+ >>> offload: wc
+ >>> batchSize: 2048
+ >>> compress: False
+ >>> loadTime: 3.792294681072235
+ >>> inferenceTime: 184.69197666505352
+ >>> modelSize: 9.858GB
+ >>> cacheSize: 23.000GB
+ >>> hiddenSize: 0.359GB
+ >>> prefillTime: 0.012098152792304973s
+ >>> throughput : 110.8873 token/s
+
+ >>>>>>>>>>>>>>>>>> OPT run <<<<<<<<<<<<<<<<<<
+ >>> model: opt-1.3b
+ >>> prefetch: False
+ >>> offload: w
+ >>> batchSize: 1024
+ >>> compress: False
+ >>> loadTime: 2.5720077119767666
+ >>> inferenceTime: 13.440489110071212
+ >>> modelSize: 4.886GB
+ >>> cacheSize: 6.900GB
+ >>> hiddenSize: 0.144GB
+ >>> prefillTime: 0.005213532391280751s
+ >>> throughput : 761.8770 token/s
+
+ >>>>>>>>>>>>>>>>>> OPT run <<<<<<<<<<<<<<<<<<
+ >>> model: opt-1.3b
+ >>> prefetch: False
+ >>> offload: 
+ >>> batchSize: 1024
+ >>> compress: False
+ >>> loadTime: 3.036867341026664
+ >>> inferenceTime: 11.802025265991688
+ >>> modelSize: 4.886GB
+ >>> cacheSize: 6.900GB
+ >>> hiddenSize: 0.144GB
+ >>> prefillTime: 0.005272019426683983s
+ >>> throughput : 867.6477 token/s
+
+ >>>>>>>>>>>>>>>>>> OPT run <<<<<<<<<<<<<<<<<<
+ >>> model: opt-1.3b
+ >>> prefetch: False
+ >>> offload: w
+ >>> batchSize: 1536
+ >>> compress: False
+ >>> loadTime: 2.5721582509577274
+ >>> inferenceTime: 17.476310156285763
+ >>> modelSize: 4.886GB
+ >>> cacheSize: 9.225GB
+ >>> hiddenSize: 0.192GB
+ >>> prefillTime: 0.005796869731057086s
+ >>> throughput : 703.1233 token/s
+
+ >>>>>>>>>>>>>>>>>> OPT run <<<<<<<<<<<<<<<<<<
+ >>> model: opt-6.7b
+ >>> prefetch: False
+ >>> offload: w
+ >>> batchSize: 512
+ >>> compress: False
+ >>> loadTime: 0.18106630723923445
+ >>> inferenceTime: 54.394296795129776
+ >>> modelSize: 24.773GB
+ >>> cacheSize: 8.200GB
+ >>> hiddenSize: 0.128GB
+ >>> prefillTime: 0.0380600974731351s
+ >>> throughput : 75.3020 token/s
+
+ >>>>>>>>>>>>>>>>>> OPT run <<<<<<<<<<<<<<<<<<
+ >>> model: opt-1.3b
+ >>> prefetch: False
+ >>> offload: w
+ >>> batchSize: 2048
+ >>> compress: False
+ >>> loadTime: 0.1752070472575724
+ >>> inferenceTime: 24.613022664096206
+ >>> modelSize: 4.886GB
+ >>> cacheSize: 12.300GB
+ >>> hiddenSize: 0.256GB
+ >>> prefillTime: 0.0052386221102551644s
+ >>> throughput : 665.6639 token/s
+
+ >>>>>>>>>>>>>>>>>> OPT run <<<<<<<<<<<<<<<<<<
+ >>> model: opt-1.3b
+ >>> prefetch: False
+ >>> offload: w
+ >>> batchSize: 2048
+ >>> compress: False
+ >>> loadTime: 0.17328023398295045
+ >>> inferenceTime: 24.64958551665768
+ >>> modelSize: 4.886GB
+ >>> cacheSize: 12.300GB
+ >>> hiddenSize: 0.256GB
+ >>> prefillTime: 0.005259827438976572s
+ >>> throughput : 664.6765 token/s
