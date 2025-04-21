@@ -78,6 +78,17 @@ def elementSize(t):
 
 def peekTensor(t, prompt):
     print(f"{prompt} {t}")
+
+def model_components_bytes(config: OptConfig):
+    h = config.hiddenSize
+    attentionElements = config.numHiddenLayer * h * (3 * h + 1) + h * (h + 1) 
+    feedforwardElements = config.numHiddenLayer * h * (4 * h + 1) + h * 4 * (h + 1)
+    othersElements = config.numHiddenLayer * h * 4 + config.vocabSize * (h + 1)
+
+    return attentionElements * elementSize(config.dtype), \
+           feedforwardElements * elementSize(config.dtype), \
+           othersElements * elementSize(config.dtype)
+
     
 def model_bytes(config: OptConfig):
     h = config.inputDim

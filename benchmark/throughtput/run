@@ -1,0 +1,9 @@
+FLEX_HOME="/home/catman/FlexAscend"
+FLEX_SCRIPT=$FLEX_HOME/"opt.py"
+
+# python $FLEX_SCRIPT --model opt-125m --tokenizer $FLEX_HOME/model/opt-125m --batch-size 64 
+python $FLEX_SCRIPT --model opt-6.7b --tokenizer $FLEX_HOME/model/opt-6.7b --batch-size 512 
+# python $FLEX_SCRIPT --model opt-6.7b --tokenizer $FLEX_HOME/model/opt-6.7b --batch-size 128 --offload w
+# python $FLEX_SCRIPT --model opt-6.7b --tokenizer $FLEX_HOME/model/opt-6.7b --batch-size 256 --offload w
+# python $FLEX_SCRIPT --model opt-6.7b --tokenizer $FLEX_HOME/model/opt-6.7b --batch-size 512  --offload w
+# python $FLEX_SCRIPT --model opt-6.7b --tokenizer $FLEX_HOME/model/opt-6.7b --batch-size 1024 --offload wc

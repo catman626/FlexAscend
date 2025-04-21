@@ -35,7 +35,7 @@ class Linear:
         b = self.bias.data().to("cuda") 
         linearOut = F.linear(x, w, b)
         del w, b
-
+    
         return linearOut
 
     def getParameters(self):
@@ -204,7 +204,7 @@ class FeedForward:
         hiddenSize = config.hiddenSize
         ffnHiddenSize = config.ffnHiddenSize
         weightHome = "CPU" \
-            if config.offload == "weight" \
+            if "w" in config.offload \
             else "GPU"
         
         self.layernorm = Layernorm(name+".layernorm", 
@@ -313,6 +313,7 @@ class InputEmbed:
 
         embed = embed.to("cuda")
         
+        
         assert len(embed.shape) == 3
         return embed
 
@@ -320,7 +321,7 @@ class OutputEmbed:
     #outputembed
     def __init__(self, config:OptConfig):
         super().__init__()
-        # self.tensorHome = "DISK" \
+        # self.tensorHome = "CPU" \
         #     if "w" in config.offload \
         #     else "GPU"
             
@@ -485,6 +486,10 @@ class OPT:
             self.loadLayer(l)
             self.compute(iterNo, l)
 
+        if iterNo == 0:
+            for l in range(self.numLayers + 1):
+                torch.save(self.hidden[l].val, f"comp/my/{l}")
+
     def singleToken(self, i, currLen):
         B = self.tokensBuffer.shape[0]
         self.hidden = [ ValueHolder() for _ in range(self.numLayers+1)]
@@ -507,7 +512,8 @@ class OPT:
             
     def run(self, inputSentences: list[str], numIter):
         # promptLen = max([len(l) for l in inputSentences])
-        inputTokens = self.tokenizer(inputSentences, padding=True).input_ids
+        inputTokens = self.tokenizer(inputSentences, padding="max_length", max_length=32).input_ids
+        print(f"size of inputTokens: { [ len(l) for l in inputTokens ] }")
         self.tokensBuffer = Tensor(inputTokens).to(torch.int32) 
         
         promptLen = self.tokensBuffer.shape[1]
@@ -533,7 +539,8 @@ class OPT:
 
 def getInputs(inputfile, batchSize):
     if inputfile is None:
-        testPrompt = "Paris is the capital city of "
+        testPrompt = "Beijing is the capital city of"
+        testPrompt = "in my palm is a clear stone , and inside it is a small ivory statuette . a guardian angel . `` figured if you 're going to be out at night getting hit by cars , you might as well have some backup . '' i look at him , feeling stunned . like this is some sort of sign . but as i stare at harlin , his mouth curved in a confident grin , i do n't care about"
         return [[ testPrompt] * batchSize ], len(testPrompt.split()) * 1.4
 
     with open(inputfile) as f:
@@ -551,7 +558,9 @@ if __name__ == "__main__":
     parser.add_argument("--ckpt", nargs="*", help="list all ckpt files")
     parser.add_argument("--tokenizer", type=str, default="/home/ma-user/work/FlexAscend/model/opt-1.3b")
     parser.add_argument("--model", type=str, required=True)
-    parser.add_argument("--offload", default="")
+    parser.add_argument("--offload", default="", help="eg. "
+                        "--offload w to offload weightm "
+                        "--offload wc to offload weight and cache, ")
     parser.add_argument("--prefetch", action="store_true")
     parser.add_argument("--compress", action="store_true")
     parser.add_argument("--interact", action="store_true")

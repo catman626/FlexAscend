@@ -29,5 +29,4 @@ if __name__ == "__main__":
     hiddenSize = 0.008
     totalSize = modelSize + cacheSize + hiddenSize
 
-
     drawPie3(modelSize/totalSize, cacheSize/totalSize, hiddenSize/totalSize)

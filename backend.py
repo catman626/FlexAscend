@@ -119,9 +119,10 @@ class FlexTensor:
         self.name = name
         self.home = home    # where the data is stored, Ascend or CPU, DISK
         
+        # print(f" >>> {self.name} home: {self.home}")
         if self.home == "Ascend":
             self.tensorCls = AscendTensor
-        if self.home == "GPU":
+        elif self.home == "GPU":
             self.tensorCls = GPUTensor
         elif self.home == "CPU":
             self.tensorCls = CPUTensor
