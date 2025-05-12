@@ -9,3 +9,5 @@ __pycache__/*
 weightHome
 comp/
 dataset
+benchmark/acc-compose/modelInput 
+benchmark/acc-compose/lambada_test_plain_text.txt 
