@@ -5,7 +5,7 @@ checkpoint_download
 *.ckpt
 *.h5
 weight_cache_home/*
-__pycache__
+__pycache__/*
 weightHome
 comp/
 dataset

@@ -61,7 +61,7 @@ class CPUTensor:
     
 class DiskTensor:
     weightHome = "weightHome"
-    compress = False
+    compress = True
     pass
     def __init__(self, name:str):
         self.name = name

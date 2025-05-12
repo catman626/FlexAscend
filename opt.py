@@ -460,7 +460,6 @@ class OPT:
     def compute(self, s, l):
         h = self.layers[l](self.hidden[l].val, s, self.attentionMask) 
         self.hidden[l+1].store(h) 
-        self.hidden[l].clear()
 
     def loadLayer(self, l):
         if l < 0 or l >= self.numLayers:
@@ -513,7 +512,8 @@ class OPT:
             
     def run(self, inputSentences: list[str], numIter):
         # promptLen = max([len(l) for l in inputSentences])
-        inputTokens = self.tokenizer(inputSentences, padding=True).input_ids
+        inputTokens = self.tokenizer(inputSentences, padding="max_length", max_length=32).input_ids
+        print(f"size of inputTokens: { [ len(l) for l in inputTokens ] }")
         self.tokensBuffer = Tensor(inputTokens).to(torch.int32) 
         
         promptLen = self.tokensBuffer.shape[1]
@@ -521,16 +521,17 @@ class OPT:
         # init attention mask
         self.attentionMask = (self.tokensBuffer != self.config.padTokenID)
         
+        print(" >>> inference begin")
         for i in range(numIter):
             print(f" \t>>> inference iter {i+1}/{numIter}")
             self.singleToken(i, promptLen+i)
             
+        print(" <<< inference end")
         outputSentences = []
         
         for line in self.tokensBuffer.tolist():
             sentence = self.tokenizer.convert_ids_to_tokens(line)
             sentence = self.tokenizer.convert_tokens_to_string(sentence)
-            sentence = sentence.replace("<pad>", "")
 
             outputSentences.append(sentence)
          
@@ -546,7 +547,7 @@ def getInputs(inputfile, batchSize):
         lines = f.readlines()
         inputs = [ lines[i:i+batchSize] for i in range(0, len(lines), batchSize)]
 
-        estimatedPromptLen = max([ len(l.split()) for l in lines ]) * 1.4
+        estimatedPromptLen = max([ len(l) for l in lines ]) * 1.4
         
     return inputs , estimatedPromptLen
 
@@ -562,11 +563,11 @@ if __name__ == "__main__":
                         "--offload wc to offload weight and cache, ")
     parser.add_argument("--prefetch", action="store_true")
     parser.add_argument("--compress", action="store_true")
-    parser.add_argument("--silent", action="store_true")
+    parser.add_argument("--interact", action="store_true")
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--logfile", type=str, default="defaultLog")
     parser.add_argument("--gen-len", type=int, default=8)
-    parser.add_argument("--output-file", type=str)
+    parser.add_argument("--response-file", type=str)
     parser.add_argument("--input-file", type=str)
 
     args = parser.parse_args()
@@ -607,50 +608,32 @@ if __name__ == "__main__":
     timers("load").stop()
     
     timers("model").start()
-
-    if args.output_file is not None:
-        outputLines = []
-        
-        print(f" >>> total : {len(inputs)} batches")
-        for bno, b in enumerate(inputs):
-            print(f" >>> inference batch-{bno} begin")
-            batchOutput = model.run(b, numIter)
-            print(f" >>> inference batch-{bno} end")
-
-            outputLines.extend(batchOutput)
-            
-            if not args.silent:
-                for s in batchOutput:
-                    print(s)
-
-        with open(args.output_file, "w+") as f:
-            writeLines = ("##@##@##@##").join(outputLines)
-            f.write(writeLines)
-
-    else:
-        for bno, b in enumerate(inputs):
-            print(f" >>> inference batch-{bno} begin")
-            batchOutput = model.run(b, numIter)
-            print(f" >>> inference batch-{bno} end")
-
-            if not args.silent:
-                for s in batchOutput:
-                    print(s)
-
-    # if args.interact: 
-    #     while True:
-    #         sentence = input(" >>> plase input the question\n"
-    #                          ">>> xxx to quit\n")
-    #         if sentence == "xxx":
-    #             break
-    #         outputs = model.run([sentence], 32, 32)
-    #         for s in outputs:
-    #             print(s)
+    if not args.interact:
+        for b in inputs:
+            outputs = model.run(b, numIter)
+            if args.ckpt is not None:
+                if args.response_file is not None:
+                    with open(args.response_file, "w+") as f:
+                        respones = ("#" * 6 + "\n").join(outputs)
+                        f.write(respones)
+                else:
+                    for s in outputs:
+                        print(s)
 
     timers("model").stop()
 
     inferenceTime = timers("model").elapsed()
     loadTime = timers("load").elapsed()
+
+    if args.interact:
+        while True:
+            sentence = input(" >>> plase input the question\n"
+                             ">>> xxx to quit\n")
+            if sentence == "xxx":
+                break
+            outputs = model.run([sentence], 32, 32)
+            for s in outputs:
+                print(s)
 
     prefillTime = timers("prefill").elapsed() / batchSize
     decodeTime = (timers("prefill").elapsed() - prefillTime) / batchSize

@@ -66,6 +66,7 @@ def integerType(t):
         torch.int64
     }
 
+<<<<<<< HEAD
 def elementSize(t):
     if t == torch.float16:
         return 2
@@ -89,6 +90,10 @@ def model_components_bytes(config: OptConfig):
            feedforwardElements * elementSize(config.dtype), \
            othersElements * elementSize(config.dtype)
 
+=======
+def peekTensor(t, prompt):
+    print(f"{prompt} {t}")
+>>>>>>> mindspore
     
 def model_bytes(config: OptConfig):
     h = config.inputDim
@@ -102,16 +107,30 @@ def model_bytes(config: OptConfig):
     # embedding
     config.vocabSize * (h + 1))
 
+<<<<<<< HEAD
     return nelement * elementSize(config.dtype)
+=======
+    return nelement * 2
+>>>>>>> mindspore
 
 def cache_bytes(config:OptConfig, batchSize, seqLen):
     # assuming float16
     nelement = config.numHiddenLayer * seqLen * batchSize * config.inputDim * 2
+<<<<<<< HEAD
     return nelement * elementSize(config.dtype)
 
 def hidden_bytes(config:OptConfig, batchSize, seqLen):
     # assuming float16
     return batchSize * seqLen * config.inputDim * elementSize(config.dtype)
+=======
+    return nelement * 2
+
+def hidden_bytes(config:OptConfig, batchSize, seqLen):
+    # assuming float16
+    return batchSize * seqLen * config.inputDim * 2
+
+    
+>>>>>>> mindspore
 
 def report(banner=None, 
            model=None, 
