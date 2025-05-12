@@ -1,14 +1,9 @@
-import torch
-from torch import Tensor, dtype
-from torch import arange, cumsum, argmax, concat, bmm
-from torch.nn import ReLU
-import torch.nn.functional as F 
-from torch.nn.functional import linear
 import numpy as np
 import os
 from compress import compress, decompress
 
 from utils import peekTensor
+from mindspore import Tensor
 
 cnt=0
 

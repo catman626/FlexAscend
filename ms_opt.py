@@ -1,10 +1,10 @@
 from transformers import AutoTokenizer
 
-import torch
-import torch.nn.functional as F
-from torch import Tensor
+from mindspore.nn import ops
 
-from backend import FlexTensor, mha_prefill, mha_decode
+import msBackend
+from msBackend import FlexTensor
+
 
 import os
 from timer import timers
@@ -14,15 +14,11 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import argparse
 import threading
-from utils import ValueHolder, prettyTime, integerType, peekTensor, GB
+from utils import ValueHolder, GB
 import utils 
 
-<<<<<<< HEAD:opt.py
-from config import OptConfig, getOptConfig
-=======
 USING_DISK=False
 DUMMY_WEIGHT=False
->>>>>>> mindspore:ms_opt.py
 
 cnt = 0
 
@@ -38,7 +34,7 @@ class Linear:
     def __call__(self, x:FlexTensor):
         w = self.weight.data().to("cuda")
         b = self.bias.data().to("cuda") 
-        linearOut = F.linear(x, w, b)
+        linearOut = msBackend.linear(x, w, b)
         del w, b
     
         return linearOut
@@ -53,13 +49,8 @@ class Linear:
 class Layernorm:
     def __init__(self, name, normDim:int, computeDev, weightHome):
         self.name = name
-<<<<<<< HEAD:opt.py
         self.weight = FlexTensor(name+".weight", (normDim, ), weightHome)
         self.bias   = FlexTensor(name+".bias", (normDim, ), weightHome)
-=======
-        self.weight = FlexTensor(name+".gamma", (normDim, ))
-        self.bias = FlexTensor(name+".beta", (normDim, ))
->>>>>>> mindspore:ms_opt.py
         self.normDim = normDim
         self.computeDev = computeDev
         assert computeDev in ["CPU", "GPU"], f"invalid computeDev: {computeDev}"
@@ -104,24 +95,6 @@ class Attention:
             if "c" in config.offload \
             else "GPU"
         
-<<<<<<< HEAD:opt.py
-        self.qProj      = Linear(self.name+".qProj", 
-                                 hiddenSize, hiddenSize, 
-                                 self.weightHome)
-        self.kProj      = Linear(self.name+".kProj", 
-                                 hiddenSize, hiddenSize, 
-                                 self.weightHome)
-        self.vProj      = Linear(self.name+".vProj", 
-                                 hiddenSize, hiddenSize, 
-                                 self.weightHome)
-        self.outProj    = Linear(self.name+".outProj", 
-                                 hiddenSize, hiddenSize, 
-                                 self.weightHome)
-        self.layernorm  = Layernorm(name+".layernorm", 
-                                    normDim=hiddenSize,
-                                    computeDev="GPU",
-                                    weightHome=self.weightHome)
-=======
         self.qProj = Linear(self.name+".qProj", hiddenSize, hiddenSize)
         self.kProj = Linear(self.name+".kProj", hiddenSize, hiddenSize)
         self.vProj = Linear(self.name+".vProj", hiddenSize, hiddenSize)
@@ -134,7 +107,6 @@ class Attention:
         self.batchMatMulSV = ops.BatchMatMul()
         
         self.residual = ops.Add()
->>>>>>> mindspore:ms_opt.py
 
     def getParameters(self):
         return {
@@ -232,22 +204,11 @@ class FeedForward:
             if "w" in config.offload \
             else "GPU"
         
-<<<<<<< HEAD:opt.py
-        self.layernorm = Layernorm(name+".layernorm", 
-                                   normDim=hiddenSize, 
-                                   computeDev="GPU", 
-                                   weightHome=weightHome)
-
-        self.linear1 = Linear(name+".linear1", hiddenSize, ffnHiddenSize, weightHome)
-        self.relu = torch.nn.ReLU()
-        self.linear2 = Linear(name+".linear2", ffnHiddenSize, hiddenSize, weightHome)
-=======
         self.layernorm = Layernorm(name+".layerNorm", normDim=hiddenSize)
         self.linear1 = Linear(name+".linear1", hiddenSize, ffnHiddenSize)
         self.relu = nn.ReLU()
         self.linear2 = Linear(name+".linear2", ffnHiddenSize, hiddenSize)
         self.residual = ops.Add()
->>>>>>> mindspore:ms_opt.py
 
     def getParameters(self):
         return {
@@ -299,22 +260,10 @@ class InputEmbed:
     #inputembed
     def __init__(self, config:OptConfig):
         super().__init__()
-<<<<<<< HEAD:opt.py
-        self.tensorHome = "CPU" \
-            if "w" in config.offload \
-            else "GPU"
-            
-        self.tokenEmbedWeight = FlexTensor("inputEmbed.tokenWeight", 
-                                           (config.vocabSize, config.hiddenSize), "CPU")
-        self.posEmbedWeight = FlexTensor("inputEmbed.posWeight",
-                                         (config.maxSeqLen + 2, config.hiddenSize),
-                                         "CPU")
-=======
         self.tokenEmbedWeight = FlexTensor(shape=(config.vocabSize, config.hiddenSize), name="inputEmbed.tokenEmbedWeight")
         self.posEmbedWeight = FlexTensor(shape=(config.maxSeqLen + 2, config.hiddenSize), name="inputEmbed.posEmbedWeight")
         self.gather = ops.operations.Gather()
         self.add = ops.Add()
->>>>>>> mindspore:ms_opt.py
 
     def getParameters(self):
         return { self.tokenEmbedWeight, self.posEmbedWeight }
@@ -369,12 +318,6 @@ class OutputEmbed:
                                     name="outputEmbed.tokenWeight", 
                                     home="CPU")
         
-<<<<<<< HEAD:opt.py
-        self.layernorm = Layernorm("outputEmbed.layernorm", 
-                                   config.hiddenSize, 
-                                   computeDev="CPU",
-                                   weightHome="CPU")    
-=======
         # self.norm = nn.LayerNorm(normalized_shape=(config.hiddenSize, ), 
         #                          gamma_init=lazyParameter(shape=(config.hiddenSize, ), name="output_embed_layer_norm.weight"),
         #                          beta_init=lazyParameter(shape=(config.hiddenSize), name="output_embed_layer_norm.bias"), 
@@ -382,7 +325,6 @@ class OutputEmbed:
         self.layernorm = Layernorm("outputEmbed.norm", config.hiddenSize)    
         self.matmul = ops.BatchMatMul(transpose_b=True)
         self.argmax = ops.Argmax()
->>>>>>> mindspore:ms_opt.py
 
     def getParameters(self):
         return {
@@ -411,7 +353,7 @@ class OutputEmbed:
         
         output = F.linear(normalized, self.tokenWeight.data())
 
-        outputIDs = torch.argmax(output, dim=-1)
+        outputIDs = msBackend.argmax(output, dim=-1)
         
         assert len(outputIDs.shape) == 1   # output shape: (B, S), element is id
         assert integerType(outputIDs.dtype)
@@ -419,7 +361,7 @@ class OutputEmbed:
     
 class OPT:
     prefetch = False
-    def __init__(self, config:OptConfig):
+    def __init__(self, config:):
         super().__init__()
         self.config = config
         self.numLayers = config.numHiddenLayer  + 2
