@@ -1,9 +1,13 @@
 from transformers import AutoTokenizer
 
-from mindspore.nn import ops
+import mindspore as ms
+from mindspore.nn import ReLU
+from mindspore import ops, Tensor
+
 
 import msBackend
-from msBackend import FlexTensor
+
+from msBackend import FlexTensor, dtype
 
 
 import os
@@ -14,26 +18,30 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import argparse
 import threading
-from utils import ValueHolder, GB
-import utils 
+from msUtils import ValueHolder, GB
+import msUtils 
+from config import OptConfig, getOptConfig
 
+ms.set_context(mode=ms.PYNATIVE_MODE)
 USING_DISK=False
 DUMMY_WEIGHT=False
 
 cnt = 0
 
 class Linear:
-    def __init__(self, name, inputChannel:int, outputChannel:int, weightHome:str):
+    def __init__(self, name, inputChannel:int, outputChannel:int, computeDev="Ascend", weightHome:str="cpu"):
         self.name = name
         self.inchannel = inputChannel
         self.outchannel = outputChannel
         self.weightHome = weightHome
         self.weight : FlexTensor = FlexTensor(name+".weight", (outputChannel, inputChannel), weightHome)
         self.bias   : FlexTensor = FlexTensor(name+".bias", (outputChannel, ), weightHome)
+        self.computeDev = computeDev
+        self.weightHome = weightHome
 
     def __call__(self, x:FlexTensor):
-        w = self.weight.data().to("cuda")
-        b = self.bias.data().to("cuda") 
+        w = self.weight.data()
+        b = self.bias.data() 
         linearOut = msBackend.linear(x, w, b)
         del w, b
     
@@ -43,8 +51,8 @@ class Linear:
         return { self.weight, self.bias }
 
     def loadWeight(self):
-        self.weight.load()
-        self.bias.load()
+        self.weight.load(self.computeDev)
+        self.bias.load(self.computeDev)
 
 class Layernorm:
     def __init__(self, name, normDim:int, computeDev, weightHome):
@@ -53,17 +61,13 @@ class Layernorm:
         self.bias   = FlexTensor(name+".bias", (normDim, ), weightHome)
         self.normDim = normDim
         self.computeDev = computeDev
-        assert computeDev in ["CPU", "GPU"], f"invalid computeDev: {computeDev}"
+        self.weightHome = weightHome
 
-    def __call__(self, x:Tensor):
+    def __call__(self, x:FlexTensor):
         w = self.weight.data()
         b = self.bias.data()
-        if self.computeDev == "GPU":
-            x = x.to("cuda")
-            w = w.to("cuda")
-            b = b.to("cuda")
         
-        lnOut = F.layer_norm(input=x, 
+        lnOut = msBackend.layer_norm(input=x, 
                          normalized_shape=(self.normDim, ), 
                          weight=w, 
                          bias=b)
@@ -75,8 +79,8 @@ class Layernorm:
         return { self.weight, self.bias }
 
     def loadWeight(self):
-        self.weight.load()
-        self.bias.load()
+        self.weight.load(self.computeDev)
+        self.bias.load(self.computeDev)
 
 class Attention:
     #attn
@@ -88,24 +92,17 @@ class Attention:
         self.seqLength = config.maxSeqLen
         hiddenSize = config.hiddenSize
         self.numHead = config.numHead
-        self.weightHome = "CPU" \
-            if "w" in config.offload \
-            else "GPU"
-        self.cacheHome = "CPU" \
-            if "c" in config.offload \
-            else "GPU"
         
         self.qProj = Linear(self.name+".qProj", hiddenSize, hiddenSize)
         self.kProj = Linear(self.name+".kProj", hiddenSize, hiddenSize)
         self.vProj = Linear(self.name+".vProj", hiddenSize, hiddenSize)
         self.outProj = Linear(self.name+".outProj", hiddenSize, hiddenSize)
 
-        self.layernorm = Layernorm(name+".attnLayerNorm", normDim=hiddenSize)
+        self.layernorm = Layernorm(name+".attnLayerNorm", 
+                                   normDim=hiddenSize,
+                                   computeDev="Ascend",
+                                   weightHome="cpu")
 
-        self.batchMatMul = ops.BatchMatMul()    # transpose handled in construct:premute
-        self.softmax = nn.Softmax()
-        self.batchMatMulSV = ops.BatchMatMul()
-        
         self.residual = ops.Add()
 
     def getParameters(self):
@@ -121,14 +118,14 @@ class Attention:
         for l in [ self.qProj, self.kProj, self.vProj, self.outProj, self.layernorm ]:
             l.loadWeight()
 
-    def prefill(self, x:Tensor, attentionMask:Tensor):
+    def prefill(self, x:FlexTensor, attentionMask:FlexTensor):
         """ 
         x: (b, s, h)  
         attentionMask in shape: (B, s)
         """
         global cnt
         
-        attentionMask = attentionMask.to("cuda")
+        attentionMask = attentionMask
 
         b, s, h = x.shape
         self.kCache = FlexTensor(self.name+".kcache", 
@@ -145,14 +142,12 @@ class Attention:
         self.vCache.store(v)
 
         # make a casual mask and combine it with attention mask
-        mhaOut = mha_prefill(q, k, v, attentionMask, self.numHead) 
+        mhaOut = msBackend.mha_prefill(q, k, v, attentionMask, self.numHead) 
 
         attnOut = self.outProj(mhaOut)
 
         attnOut = attnOut + x
         
-        cnt = cnt+1
-
         return attnOut
     
     def decode(self, x, attentionMask):
@@ -166,16 +161,16 @@ class Attention:
         normalX = self.layernorm(x)
         # (b, s, h)
         q, k, v = self.qProj(normalX), self.kProj(normalX), self.vProj(normalX)
-        kcache = self.kCache.data().to("cuda")
-        vcache = self.vCache.data().to("cuda")
-        k = torch.concat([kcache, k], axis=1)
-        v = torch.concat([vcache, v], axis=1)
+        kcache = self.kCache.data()
+        vcache = self.vCache.data()
+        k = msBackend.concat([kcache, k], axis=1)
+        v = msBackend.concat([vcache, v], axis=1)
         self.kCache.store(k)
         self.vCache.store(v)
 
-        attentionMask = attentionMask.to("cuda")
+        attentionMask = attentionMask
 
-        mhaOut = mha_decode(q, k, v, attentionMask, self.numHead)
+        mhaOut = msBackend.mha_decode(q, k, v, attentionMask, self.numHead)
 
         attnOut = self.outProj(mhaOut)
 
@@ -192,7 +187,6 @@ class Attention:
         else :
             return self.decode(x, attnMask)
 
-
 class FeedForward:
     #ffn
     def __init__(self, name:str, config:OptConfig):
@@ -200,15 +194,14 @@ class FeedForward:
         self.name = name
         hiddenSize = config.hiddenSize
         ffnHiddenSize = config.ffnHiddenSize
-        weightHome = "CPU" \
-            if "w" in config.offload \
-            else "GPU"
         
-        self.layernorm = Layernorm(name+".layerNorm", normDim=hiddenSize)
+        self.layernorm = Layernorm(name+".layerNorm", 
+                                   normDim=hiddenSize, 
+                                   computeDev="Ascend", 
+                                   weightHome="cpu")
         self.linear1 = Linear(name+".linear1", hiddenSize, ffnHiddenSize)
-        self.relu = nn.ReLU()
+        self.relu = ReLU()
         self.linear2 = Linear(name+".linear2", ffnHiddenSize, hiddenSize)
-        self.residual = ops.Add()
 
     def getParameters(self):
         return {
@@ -260,37 +253,32 @@ class InputEmbed:
     #inputembed
     def __init__(self, config:OptConfig):
         super().__init__()
-        self.tokenEmbedWeight = FlexTensor(shape=(config.vocabSize, config.hiddenSize), name="inputEmbed.tokenEmbedWeight")
-        self.posEmbedWeight = FlexTensor(shape=(config.maxSeqLen + 2, config.hiddenSize), name="inputEmbed.posEmbedWeight")
+        self.tokenEmbedWeight = FlexTensor(shape=(config.vocabSize, config.hiddenSize), name="inputEmbed.tokenEmbedWeight", home="cpu")
+        self.posEmbedWeight = FlexTensor(shape=(config.maxSeqLen + 2, config.hiddenSize), name="inputEmbed.posEmbedWeight", home="cpu")
         self.gather = ops.operations.Gather()
         self.add = ops.Add()
+        self.computeDev = "cpu"
 
     def getParameters(self):
         return { self.tokenEmbedWeight, self.posEmbedWeight }
 
     def loadWeight(self):
         for l in self.getParameters():
-            l.load()
+            l.load(self.computeDev)
 
-    def __call__(self, inputIDs:Tensor, iterno, attentionMask:Tensor):
+    def __call__(self, inputIDs:Tensor, iterno, attentionMask:FlexTensor):
         """
         inputIDs : (B, S) / (B, 1)
         each element is an idx
         attentionMask: (B, S)
         """
         assert len(inputIDs.shape) == 2
-        assert isinstance(inputIDs, Tensor)
-        assert integerType(inputIDs.dtype), f"embedding input not integer: {inputIDs.dtype}"
-        assert inputIDs.device.type == "cpu"
-        assert self.posEmbedWeight.data().device.type == "cpu"
-        assert self.tokenEmbedWeight.data().device.type == "cpu"
-        assert inputIDs.device.type == "cpu"
 
-        tokenEmbed = F.embedding( inputIDs, self.tokenEmbedWeight.data() ,0)
+        tokenEmbed = msBackend.embedding( inputIDs, self.tokenEmbedWeight.data() ,0)
 
-        posIds = torch.cumsum(attentionMask, dim=1) * attentionMask + 1
+        posIds = msBackend.cumsum(attentionMask, dim=1) * attentionMask + 1
         
-        posEmbed = F.embedding(posIds, self.posEmbedWeight.data())
+        posEmbed = msBackend.embedding(posIds, self.posEmbedWeight.data())
         
         currLength = attentionMask.shape[1]
         inputIDLength = inputIDs.shape[1]
@@ -300,8 +288,7 @@ class InputEmbed:
         assert tokenEmbed.shape == posEmbed.shape
         embed = tokenEmbed + posEmbed
 
-        embed = embed.to("cuda")
-        
+        embed = embed
         
         assert len(embed.shape) == 3
         return embed
@@ -310,21 +297,19 @@ class OutputEmbed:
     #outputembed
     def __init__(self, config:OptConfig):
         super().__init__()
-        # self.tensorHome = "CPU" \
-        #     if "w" in config.offload \
-        #     else "GPU"
             
         self.tokenWeight = FlexTensor(shape=(config.vocabSize, config.hiddenSize), 
                                     name="outputEmbed.tokenWeight", 
-                                    home="CPU")
+                                    home="cpu")
         
         # self.norm = nn.LayerNorm(normalized_shape=(config.hiddenSize, ), 
         #                          gamma_init=lazyParameter(shape=(config.hiddenSize, ), name="output_embed_layer_norm.weight"),
         #                          beta_init=lazyParameter(shape=(config.hiddenSize), name="output_embed_layer_norm.bias"), 
         #                          dtype=dtype.float32)
-        self.layernorm = Layernorm("outputEmbed.norm", config.hiddenSize)    
+        self.layernorm = Layernorm("outputEmbed.norm", config.hiddenSize, computeDev="cpu", weightHome="cpu")    
         self.matmul = ops.BatchMatMul(transpose_b=True)
         self.argmax = ops.Argmax()
+        self.computeDev = "cpu"
 
     def getParameters(self):
         return {
@@ -333,7 +318,7 @@ class OutputEmbed:
         }
 
     def loadWeight(self):
-        self.tokenWeight.load()
+        self.tokenWeight.load(self.computeDev)
         self.layernorm.loadWeight()
     
     def __call__(self, x, iterno, attnMask):
@@ -343,7 +328,6 @@ class OutputEmbed:
         """
         assert len(x.shape) == 3
         
-        
         if x.device.type != "cpu":
             x = x.cpu() 
         
@@ -351,17 +335,16 @@ class OutputEmbed:
 
         normalized = self.layernorm(lastToken)
         
-        output = F.linear(normalized, self.tokenWeight.data())
+        output = ops.dense(normalized, self.tokenWeight.data())
 
         outputIDs = msBackend.argmax(output, dim=-1)
         
         assert len(outputIDs.shape) == 1   # output shape: (B, S), element is id
-        assert integerType(outputIDs.dtype)
         return outputIDs
     
 class OPT:
     prefetch = False
-    def __init__(self, config:):
+    def __init__(self, config:OptConfig):
         super().__init__()
         self.config = config
         self.numLayers = config.numHiddenLayer  + 2
@@ -391,63 +374,16 @@ class OPT:
         for l in self.layers:
             ret = ret.union(l.getParameters())
         return ret
+
+    def loadModel(self, weightFname):
+        if weightFname is not None:
+            raise NotImplementedError("!!! not implemented")
+        
+        self.initZeros()
         
     def initZeros(self):
         for p in tqdm(self.getParameters()):
             p.initZeros()
-
-    def loadModelFromFile(self, weightFname:str):
-        assert isinstance(weightFname, str), f"invalid type: {type(weightFname)}"
-        
-        weights = torch.load(weightFname)
-        unusedWeight = set(weights.keys())
-        loaded = []
-
-        for p in self.getParameters():
-            if p.name in weights.keys():
-                p.store(weights[p.name].to(torch.float32))
-                unusedWeight.remove(p.name)
-                loaded.append(p.name)
-
-        if unusedWeight:
-            print(f" !!! unused weight")
-            for uw in unusedWeight:
-                print(uw)
-
-        return loaded
-
-
-    def loadModel(self, weightFname):
-        if not weightFname:
-            print(f" >>> ckpt not provided")
-            print(f" >>> use dummy weight")
-            self.initZeros()
-            return
-
-        print(">>> load weight begin")
-        loaded = []
-        if isinstance(weightFname, str):
-            ld = self.loadModelFromFile(weightFname)  
-            loaded.append(ld)
-        else:
-            for w in weightFname:
-                ld = self.loadModelFromFile(w)
-                loaded.extend(ld)
-                
-        print("<<< load weight finish")
-        
-        fail = False
-        for p in self.getParameters():
-            if p.name not in loaded:
-                print(f" !!! weight not loaded: {p.name}")
-                fail = True
-            
-        if fail:
-            print(" >>> successfully loaded: ")
-            for l in loaded:
-                print(l)
-            exit(1)
-
 
     def compute(self, s, l):
         h = self.layers[l](self.hidden[l].val, s, self.attentionMask) 
@@ -499,14 +435,14 @@ class OPT:
         else:
             self.coreLoops(i)
         
-        self.tokensBuffer = torch.concat([self.tokensBuffer, self.hidden[-1].val.unsqueeze(1)], axis=1)
-        self.attentionMask = torch.concat(
-            [self.attentionMask, torch.ones((B,  1), dtype=torch.bool) ], dim=1)
+        self.tokensBuffer = msBackend.concat([self.tokensBuffer, self.hidden[-1].val.unsqueeze(1)], axis=1)
+        self.attentionMask = msBackend.concat(
+            [self.attentionMask, msBackend.ones((B,  1), dtype=dtype.bool) ], dim=1)
             
     def run(self, inputSentences: list[str], numIter):
         # promptLen = max([len(l) for l in inputSentences])
         inputTokens = self.tokenizer(inputSentences, padding=True).input_ids
-        self.tokensBuffer = Tensor(inputTokens).to(torch.int32) 
+        self.tokensBuffer = Tensor(inputTokens).type(dtype.int32) 
         
         promptLen = self.tokensBuffer.shape[1]
 
@@ -580,11 +516,11 @@ if __name__ == "__main__":
     
     inputs, estimatedPromptLen = getInputs(args.input_file, batchSize)
     
-    modelSize = utils.model_bytes(config)  
-    cacheSize = utils.cache_bytes(config, batchSize, estimatedPromptLen + numIter)
-    hiddenSize = utils.hidden_bytes(config, batchSize, estimatedPromptLen +numIter)
+    modelSize = msUtils.model_bytes(config)  
+    cacheSize = msUtils.cache_bytes(config, batchSize, estimatedPromptLen + numIter)
+    hiddenSize = msUtils.hidden_bytes(config, batchSize, estimatedPromptLen +numIter)
 
-    print(utils.report(banner="inference begin",
+    print(msUtils.report(banner="inference begin",
                      model=config.modelName,
                      prefetch=args.prefetch,
                      offload=args.offload,
@@ -647,10 +583,10 @@ if __name__ == "__main__":
     prefillTime = timers("prefill").elapsed() / batchSize
     decodeTime = (timers("prefill").elapsed() - prefillTime) / batchSize
     throughtput =  batchSize * numIter / inferenceTime 
-    print(utils.report(inferenceTime=inferenceTime,loadTime=loadTime, batchSize=args.batch_size, prefillTime=prefillTime, decodeTime=decodeTime, throughput=throughtput))
+    print(msUtils.report(inferenceTime=inferenceTime,loadTime=loadTime, batchSize=args.batch_size, prefillTime=prefillTime, decodeTime=decodeTime, throughput=throughtput))
 
     with open(logFile, "a+") as f:
-        r = utils.report(banner="OPT run",
+        r = msUtils.report(banner="OPT run",
                          model=config.modelName, 
                          prefetch=args.prefetch, 
                              offload=args.offload, 

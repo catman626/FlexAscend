@@ -19,8 +19,6 @@ import utils
 
 from config import OptConfig, getOptConfig
 
-cnt = 0
-
 class Linear:
     def __init__(self, name, inputChannel:int, outputChannel:int, weightHome:str):
         self.name = name
@@ -283,7 +281,7 @@ class InputEmbed:
         for l in self.getParameters():
             l.load()
 
-    def __call__(self, inputIDs:Tensor, iterno, attentionMask:Tensor):
+    def __call__(self, inputIDs:FlexTensor, iterno, attentionMask:Tensor):
         """
         inputIDs : (B, S) / (B, 1)
         each element is an idx

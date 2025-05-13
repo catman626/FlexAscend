@@ -1,4 +1,3 @@
 
-python opt.py --model opt-125m \
-    --ckpt model/opt-125m/mindspore_model.ckpt \
+python msOpt.py --model opt-125m \
     --tokenizer model/opt-125m

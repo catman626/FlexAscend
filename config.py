@@ -1,4 +1,4 @@
-# import torch
+import torch
 
 class OptConfig:
     def __init__(self, name,
@@ -6,7 +6,7 @@ class OptConfig:
             hiddenSize, inputDim, ffnEmbedDim,
         ):
         self.modelName = name
-        # self.dtype = torch.float32
+        self.dtype = torch.float32
         self.hasBias = True
         self.maxSeqLen= maxSeqLen
         self.inputDim = inputDim

@@ -1,14 +1,12 @@
 import numpy as np
 import os
-from compress import compress, decompress
-
-from utils import peekTensor
+import mindspore as ms
+from msCompress import compress, decompress
 from mindspore import Tensor
-
-cnt=0
+from mindspore import dtype, ops
 
 class AscendTensor:
-    def __init__(self):
+    def __init__(self, name:str):
         self.val = None
     
     def store(self, data:Tensor):
@@ -18,14 +16,27 @@ class AscendTensor:
         return self.val
         
 class CPUTensor:
-    def __init__(self):
+    def __init__(self, name:str):
         self.val = None
+        self.cached = None
+        self.name = name
         
     def store(self, data:Tensor):
         self.val = data
 
     def data(self):
+        if self.cached is not None:
+            cached = self.cached
+            self.cached = None
+            return cached
+        
         return self.val
+
+    def load(self, dstDev):
+        assert dstDev in ["Ascend", "cpu"]
+
+        if dstDev == "Ascend":
+            self.cached = self.val.move_to("Ascend") 
     
 class DiskTensor:
     weightHome = "weightHome"
@@ -46,22 +57,27 @@ class DiskTensor:
         if DiskTensor.compress:
             data, extra = compress(data)
             
-            torch.save(data, self.filename)
-            torch.save(extra, self.filename+".extra")
+            np.save(data, self.filename)
+            np.save(extra, self.filename+".extra")
         else:
-            torch.save(data, self.filename)
+            np.save(data, self.filename)
 
-    def load(self):
-        assert self.filename is not None, f"disk-tensor fetch before store"
-        t = torch.load(self.filename)
-        t = Tensor(t)
+    def load(self, dstDev):
+        assert dstDev in ["Ascend", "cpu"]
+        t = np.load(self.filename)      # to np array
+        t = Tensor(t)                   # to ms tensor
         
         if DiskTensor.compress:
-            extra = torch.load(self.filename + ".extra") 
+            extra = np.load(self.filename + ".extra") 
 
             self.cached = decompress(t, extra, self.shape)
         else:
             self.cached = t
+
+        if dstDev == "Ascend":
+            self.cached = self.cached.move_to("Ascend")
+        else:
+            self.cached = self.cached.move_to("cpu")
 
     def data(self):
         if self.cached is not None: 
@@ -69,8 +85,7 @@ class DiskTensor:
             self.cached = None
             return cached 
 
-        self.load()
-        return self.data()
+        raise RuntimeError(f"disk-tensor fetch before load")
 
     @staticmethod
     def clear():
@@ -85,7 +100,7 @@ class FlexTensor:
         
         if self.home == "Ascend":
             self.tensorCls = AscendTensor
-        elif self.home == "CPU":
+        elif self.home == "cpu":
             self.tensorCls = CPUTensor
         elif self.home == "DISK":
             self.tensorCls = DiskTensor
@@ -97,8 +112,8 @@ class FlexTensor:
     def store(self, data:Tensor):
         self.tensor.store(data)
 
-    def load(self):
-        self.tensor.load()
+    def load(self, dstDev):
+        self.tensor.load(dstDev)
 
     def data(self):
         return self.tensor.data()
@@ -114,30 +129,23 @@ class FlexTensor:
     def clear():
         DiskTensor.clear()
         
-
-def batchMatMul(A, B, transposeA=False, transposeB=False):
-    Ad = A.data()
-    Bd = B.data()
-    if transposeA :
-        Ad = Ad.T
-    if transposeB:
-        Bd = Bd.T
-
-    return torch.bmm(Ad, Bd)
-
-
 def layernorm(x:FlexTensor, normalizedShape:FlexTensor, weight:FlexTensor, bias:FlexTensor):
-    return F.layer_norm(x.data(), normalizedShape, weight.data(), bias.data())
+    return ops.layer_norm(x.data(), normalizedShape, weight.data(), bias.data())
 
 def batchMatMul(x:FlexTensor, y:FlexTensor):
-    return torch.bmm(x.data(), y.data())
+    return ops.bmm(x.data(), y.data())
 
 def argmax(x:FlexTensor):
-    return torch.argmax(x.data(), dim=-1)
+    return ops.argmax(x.data(), dim=-1)
 
 def sqrt(x):
     return x ** -0.5
 
+def cumsum(x:Tensor, dim:int):
+    return ops.cumsum(x, axis=dim)
+
+def embedding(idx:Tensor, weight:Tensor, paddingIdx:int=0):
+    return ops.embedding(idx, weight, paddingIdx)
 def mha_prefill(q:Tensor, k:Tensor, v:Tensor, attentionMask:Tensor, numHead:int):
     b, s, h = q.shape
     
@@ -169,7 +177,6 @@ def mha_prefill(q:Tensor, k:Tensor, v:Tensor, attentionMask:Tensor, numHead:int)
     ids = torch.arange(0, s)
     casualMask = ids <= ids.view(s, 1)
     mask = casualMask.view(1, 1, s, s) & attentionMask.view(b, 1, 1, s)
-    # peekTensor(mask, " >>> mask")
 
     score = score.view(b, numHead, s, s)
     score = torch.where(mask, score.view(b, numHead, s, s), -1e4) 
