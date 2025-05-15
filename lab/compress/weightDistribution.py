@@ -1,36 +1,87 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
+import torch
+import re
 
+plt.rcParams["font.family"] = "SimHei"
 # Sample data - replace this with your actual tensor values
-num_layers = 12
-num_components = 5
-layer_numbers = np.arange(1, num_layers + 1)
-component_names = [f'Component {i+1}' for i in range(num_components)]
 
-# Generate random tensor values for demonstration (shape: layers × components)
-np.random.seed(42)
-tensor_values = np.random.rand(num_layers, num_components) * 100
+def draw2DGrapgh(data):
+    '''
+    data in [layerno][component]
+    '''
+    nLayers = len(data)
+    weightNames = [ "qProj", "kProj", "vProj", "outProj", "linear1", "linear2" ]
 
-# Create the plot
-plt.figure(figsize=(10, 6))
+    value = np.array([ [ l[n] for n in weightNames ] for l in data ])
+    print(value.shape)
 
-# Create a heatmap
-heatmap = plt.pcolor(tensor_values.T, cmap='viridis', linewidths=1)
+    # Create the plot
+    plt.figure(figsize=(10, 6))
 
-# Add colorbar
-cbar = plt.colorbar(heatmap)
-cbar.set_label('Tensor Value')
+    # Create the heatmap with imshow
+    im = plt.imshow(value.T,  # Transpose to get components on y-axis
+                    cmap='viridis',
+                    aspect='auto',
+                    origin='lower',
+                    interpolation='nearest')
 
-# Set ticks and labels
-plt.xticks(np.arange(0.5, num_layers + 0.5), layer_numbers)
-plt.yticks(np.arange(0.5, num_components + 0.5), component_names)
+    # Add colorbar
+    cbar = plt.colorbar(im)
+    cbar.set_label('权重最大值')
 
-# Add labels
-plt.xlabel('Layer Number')
-plt.ylabel('Model Component')
-plt.title('Model Component Values Across Layers')
+    # Customize ticks and labels
+    plt.xticks(np.arange(nLayers), np.arange(1, nLayers+1))
+    plt.yticks(np.arange(len(data[0])), data[0].keys())
 
-# Show plot
-plt.tight_layout()
-plt.show()
+
+    # Add labels and title
+    plt.xlabel('层号')
+    plt.ylabel('模型组件')
+    plt.title('不同层的权重最大值分布图')
+
+
+    plt.tight_layout()
+    plt.show()
+
+def parseCkpt(ckptFile):
+    data = torch.load(ckptFile)
+    
+    parsed = dict()
+    for n, v in data.items():
+        matched = re.match(r"^layers\.(\d+)\.(ffn|attn)\.([a-zA-Z0-9]+)\.(weight|bias)", n)
+        if matched is not None:
+            layerno = int(matched.group(1))
+            name = matched.group(3)
+            wob = matched.group(4)
+
+            if layerno not in parsed:
+                parsed[layerno] = dict()
+            if name != "layernorm" and wob == "weight":
+                assert name not in parsed[layerno], f"Duplicated weight name {name} in layer {layerno}"
+                mx = torch.max(v).item()
+                parsed[layerno][name] = mx
+        else :
+            print(f"Not matched: {n}")
+                
+    nLayers = len(parsed)
+    listParsed = [ _ for _ in range(nLayers) ]
+    for i in range(nLayers):
+        listParsed[i] = parsed[i]
+    # print to check
+    for layerno, v in enumerate(listParsed):
+        print(f"Layer {layerno}:")
+        for name, value in v.items():
+            print(f"  {name}: {value}")
+    return listParsed
+    
+import argparse
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("ckptFile", type=str)
+
+    args = parser.parse_args()
+    
+    weightDistribution = parseCkpt(args.ckptFile)
+    draw2DGrapgh(weightDistribution)
