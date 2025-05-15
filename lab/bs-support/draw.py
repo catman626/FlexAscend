@@ -6,6 +6,7 @@ import numpy as np
 #     'vanilla': [120, 180, 210],  # throughput for batch sizes 16, 32, 64
 #     'compression': [90, 150, 200]  # throughput for batch sizes 16, 32, 64
 # }
+plt.rcParams['font.family'] = "SimHei"
 
 modelNames = [
     "opt-125m",
@@ -15,10 +16,10 @@ modelNames = [
     "opt-13b"
 ]
 
-methods = ['vanilla', 'offload']
+methods = ['默认', '使用卸载']
 bsSupported = {
-    'vanilla': [2048, 1024, 256, 0, 0],  # throughput for batch sizes 16, 32, 64
-    'offload': [2048, 2048, 1024, 512, 256]  # throughput for batch sizes 16, 32, 64
+    '默认': [2048, 1024, 256, 0, 0],  # throughput for batch sizes 16, 32, 64
+    '使用卸载': [2048, 2048, 1024, 512, 256]  # throughput for batch sizes 16, 32, 64
 }
 
 x = np.arange(len(modelNames))  # the label locations
@@ -31,9 +32,9 @@ for i, method in enumerate(bsSupported):
             width, 
             label=method)
 
-ax.set_xlabel('Model')
-ax.set_ylabel('batchSize supported')
-ax.set_title('batch-size support Comparison by Batch Size and Compression Method')
+ax.set_xlabel('模型')
+ax.set_ylabel('支持的批大小')
+ax.set_title('最大支持的批大小图像')
 ax.set_xticks(x + width/2)
 ax.set_xticklabels(modelNames)
 ax.legend()

@@ -6,7 +6,7 @@ class OptConfig:
             hiddenSize, inputDim, ffnEmbedDim,
         ):
         self.modelName = name
-        self.dtype = torch.float32
+        self.dtype = torch.float16
         self.hasBias = True
         self.maxSeqLen= maxSeqLen
         self.inputDim = inputDim
@@ -21,6 +21,7 @@ class OptConfig:
         self.ffnHiddenSize = ffnEmbedDim
         self.tokenizer = None
         self.padTokenID :int = 1
+        self.offloadDev = "DISK"
 
 def getOptConfig(name)->OptConfig:
     if name == "opt-125m":

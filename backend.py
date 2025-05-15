@@ -1,5 +1,5 @@
 import torch
-from torch import Tensor, dtype
+from torch import  dtype, Tensor
 from torch import arange, cumsum, argmax, concat, bmm
 from torch.nn import ReLU
 import torch.nn.functional as F 
@@ -11,19 +11,6 @@ from compress import compress, decompress
 from utils import peekTensor
 
 cnt=0
-
-class AscendTensor:
-    def __init__(self, name):
-        self.val = None
-    
-    def store(self, data:Tensor):
-        self.val = data
-        
-    def data(self):
-        return self.val
-
-    def load(self):
-        pass    
 
 class GPUTensor:
     def __init__(self, name):
@@ -37,13 +24,14 @@ class GPUTensor:
     def data(self):
         return self.val
 
-    def load(self):
+    def load(self, dstDev):
         pass
         
         
 class CPUTensor:
     def __init__(self, name):
         self.val = None
+        self.cached = None
         
     def store(self, data:Tensor):
         if data.device.type != "cpu":
@@ -54,14 +42,24 @@ class CPUTensor:
         self.val = data
 
     def data(self):
+        if self.cached is not None:
+            cached = self.cached
+            self.cached = None
+            return cached
+
         return self.val
 
-    def load(self):
-        pass
+    def load(self, dstDev):
+        assert dstDev in [ "cpu", "cuda" ]
+
+        if dstDev == "cpu":
+            return
+
+        self.cached = self.val.to("cuda")
     
 class DiskTensor:
     weightHome = "weightHome"
-    compress = True
+    compress = False
     pass
     def __init__(self, name:str):
         self.name = name
@@ -84,13 +82,12 @@ class DiskTensor:
         else:
             torch.save(data, self.filename)
 
-    def load(self):
+    def load(self, dstDev):
         assert self.filename is not None, f"disk-tensor fetch before store"
-        t = torch.load(self.filename)
-        t = Tensor(t)
+        t = torch.load(self.filename, map_location=dstDev)
         
         if DiskTensor.compress:
-            extra = torch.load(self.filename + ".extra") 
+            extra = torch.load(self.filename + ".extra", map_location=dstDev) 
 
             self.cached = decompress(t, extra, self.shape)
         else:
@@ -102,8 +99,7 @@ class DiskTensor:
             self.cached = None
             return cached 
 
-        self.load()
-        return self.data()
+        raise NotImplementedError(f"disk tensor fetch before load, ({self.name})")
 
     @staticmethod
     def clear():
@@ -114,17 +110,15 @@ class DiskTensor:
             os.remove(os.path.join(DiskTensor.weightHome, f))
         
 class FlexTensor:
-    def __init__(self, name, shape=None, home=None):
+    def __init__(self, name, shape=None, home=None, dtype=torch.float16):
         self.shape = shape
         self.name = name
-        self.home = home    # where the data is stored, Ascend or CPU, DISK
+        self.home = home    # where the data is stored, GPU or CPU, DISK
+        self.dtype = dtype
         
-        # print(f" >>> {self.name} home: {self.home}")
-        if self.home == "Ascend":
-            self.tensorCls = AscendTensor
-        elif self.home == "GPU":
+        if self.home == "cuda":
             self.tensorCls = GPUTensor
-        elif self.home == "CPU":
+        elif self.home == "cpu":
             self.tensorCls = CPUTensor
         elif self.home == "DISK":
             self.tensorCls = DiskTensor
@@ -134,16 +128,17 @@ class FlexTensor:
         self.tensor = self.tensorCls(self.name)
 
     def store(self, data:Tensor):
+        self.cached = None
         self.tensor.store(data)
 
-    def load(self):
-        self.tensor.load()
+    def load(self, dstDev):
+        self.tensor.load(dstDev)
 
     def data(self):
         return self.tensor.data()
 
     def initZeros(self):
-        return self.tensor.store(Tensor(np.zeros(self.shape, dtype=np.float32)))
+        return self.tensor.store(torch.zeros(size=self.shape, dtype=self.dtype))
 
     @staticmethod
     def setCompress(compress:bool):
@@ -152,6 +147,10 @@ class FlexTensor:
     @staticmethod
     def clear():
         DiskTensor.clear()
+
+    @staticmethod
+    def sync():
+        torch.cuda.synchronize()
 
 def batchMatMul(A, B, transposeA=False, transposeB=False):
     Ad = A.data()
