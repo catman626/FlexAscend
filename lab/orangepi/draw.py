@@ -1,18 +1,48 @@
 import matplotlib.pyplot as plt
+import numpy as np
+import re
+import sys
 
-# Example data (replace with yours)
-batch_sizes = [8, 16, 32, 64, 128]
-throughput = [1, 1.5, 1.8, 2.1, 2.2]
+sys.path.append("..")
+import labutils
 
-# Create bar chart
-plt.figure(figsize=(10, 6))
-plt.bar(x=[ str(bs) for bs in batch_sizes] , height=throughput)
+plt.rcParams['font.family'] = 'SimHei'
+floatPattern = r"[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?"
 
-# Customize the chart
-plt.xlabel('batch-size', fontsize=12)
-plt.ylabel('throughput (ops/sec)', fontsize=12)
-plt.title('throughput vs. batch Size', fontsize=14)
-plt.grid(axis='y', linestyle='--', alpha=0.7)
+def drawThroughputVSBS(throughputs:dict):
+    """
+    input : {
+        bs0: t0,
+        bs1: t1,
+        ...
+    }
+    """
 
-# Show the plot
-plt.show()
+    print(" >>> throughputs: ", throughputs)
+    batchSizes =  list(throughputs.keys())
+    batchSizes.sort()
+    throughputList = [throughputs[bs] for bs in batchSizes]
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    for i, method in enumerate(batchSizes):
+        ax.bar([ str(bs) for bs in batchSizes],
+            throughputList)
+
+    ax.set_xlabel('批大小')
+    ax.set_ylabel('吞吐量')
+    ax.set_title('香橙派上OPT-30b大模型吞吐量')
+
+    plt.show()
+
+import argparse
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("logfile", type=str)
+
+    args = parser.parse_args()
+    
+    parsed = labutils.parseLog(args.logfile)
+    throughputs = { p["batchSize"] : p["throughput"] for p in parsed }
+    
+    drawThroughputVSBS(throughputs)
+    

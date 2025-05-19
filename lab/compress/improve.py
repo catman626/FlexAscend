@@ -46,7 +46,7 @@ if __name__ == "__main__":
     
     # print(throughputs)
     labutils.drawBarsGroup2(throughputs, 
-                   title="压缩算法对175b大模型吞吐量的影响",
+                   title="压缩算法对吞吐量的影响",
                    xlabel="批大小",
                    ylabel="吞吐量")
     

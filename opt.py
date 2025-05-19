@@ -508,13 +508,14 @@ class OPT:
             return 
 
         for l in range(self.numLayers):
+            timers("loadLayer").start()
             self.loadLayer(l)
             self.loadCache(l)
+            timers("loadLayer").stop()
+            
+            timers("computeLayer").start()
             self.compute(iterNo, l)
-
-        # if iterNo == 0:
-        #     for l in range(self.numLayers + 1):
-        #         torch.save(self.hidden[l].val, f"comp/my/{l}")
+            timers("computeLayer").stop()
 
     def singleToken(self, i, currLen):
         B = self.tokensBuffer.shape[0]
@@ -688,6 +689,10 @@ if __name__ == "__main__":
                             prefillTime=prefillTime,
                             throughput=throughtput
         )
+        loadTime = timers("loadLayer").elapsed()
+        computeTime = timers("computeLayer").elapsed()
+        r = r + f" load time: {prettyTime(loadTime)}\n"
+        r = r + f" compute time: {prettyTime(computeTime)}\n"
         f.write(r)
 
     FlexTensor.clear()

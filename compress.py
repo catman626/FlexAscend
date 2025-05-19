@@ -86,8 +86,10 @@ def compress(data:Tensor):
 def decompress(data, extra, shape):
     """
     input is all on Ascend
-    data / extra is ms.tensor
+    data / extra is tensor
     """
+    assert data.device == extra.device
+
     ng, halfg = data.shape[-2],  data.shape[-1]
     g = 2*halfg
     originShape = data.shape[:-2] + (ng, g) # shape before bitwise compression
@@ -97,7 +99,8 @@ def decompress(data, extra, shape):
     scale, mn = extra[0], extra[1]
     upper = data.bitwise_right_shift(4)
     lower = data.bitwise_and(15)
-    data = Tensor(np.zeros(dtype=np.uint8, shape=originShape))
+
+    data = torch.zeros(size=originShape, dtype=torch.uint8, device=data.device)
 
     upperSlice, lowerSlice = lastDimEvenSlice(data.shape)
     data[upperSlice] = upper

@@ -156,3 +156,10 @@ def report(banner=None,
         r += f" >>> throughput : {throughput:.4f} token/s\n"
 
     return r
+
+def report(content:dict):
+    r = ""
+    for k ,v in content.items():
+        r += f" >>> {k} : {v}\n"
+
+    return r

@@ -17,7 +17,6 @@ def extract(parsed):
         { }    
     ]    
     output should be: 
-    
     extracted: [mode][bs][throughputs]
     """
     extracted = {}
@@ -29,7 +28,7 @@ def extract(parsed):
             extracted[mode] = {}
             
         assert bs not in extracted[mode], f"batchSize {bs} already exists in {mode}"
-        extracted[mode][bs] = thpt
+        extracted[mode][bs] = thpt / 4
 
     return extracted
 
@@ -46,7 +45,7 @@ if __name__ == "__main__":
     
     # print(throughputs)
     labutils.drawBarsGroup2(throughputs, 
-                   title="压缩算法对175b大模型吞吐量的影响",
+                   title="香橙派系统运行OPT-30b大模型效果",
                    xlabel="批大小",
                    ylabel="吞吐量")
     

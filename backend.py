@@ -88,7 +88,7 @@ class DiskTensor:
         
         if DiskTensor.compress:
             extra = torch.load(self.filename + ".extra", map_location=dstDev) 
-
+            
             self.cached = decompress(t, extra, self.shape)
         else:
             self.cached = t
@@ -108,6 +108,7 @@ class DiskTensor:
 
         for f in os.listdir(DiskTensor.weightHome):
             os.remove(os.path.join(DiskTensor.weightHome, f))
+        os.rmdir(DiskTensor.weightHome)
         
 class FlexTensor:
     def __init__(self, name, shape=None, home=None, dtype=torch.float16):
@@ -138,7 +139,7 @@ class FlexTensor:
         return self.tensor.data()
 
     def initZeros(self):
-        return self.tensor.store(torch.zeros(size=self.shape, dtype=self.dtype))
+        return self.tensor.store(torch.zeros(size=self.shape, dtype=self.dtype, device="cuda"))
 
     @staticmethod
     def setCompress(compress:bool):
