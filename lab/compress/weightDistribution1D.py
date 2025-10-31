@@ -1,14 +1,14 @@
 import matplotlib.pyplot as plt
-from weightDistribution2D import parseCkpt
+from weightDistribution2D import parseCkpt, labutils
 
 plt.rcParams["font.family"] = "SimHei"
 
 def drawBar(data):
     plt.figure(figsize=(10, 6))
     plt.bar(range(len(data)), data)
-    plt.xlabel("层号")
-    plt.ylabel("权重最大值")
-    plt.title("不同层 outProj 的最大值分布图")
+    plt.xlabel("层号", fontsize=labutils.labelFontSize)
+    plt.ylabel("权重最大值", fontsize=labutils.labelFontSize)
+    plt.title("不同层 outProj 的最大值分布", fontsize=labutils.titleFontSize)
     plt.show()
 
 import argparse

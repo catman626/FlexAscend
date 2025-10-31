@@ -2,6 +2,9 @@ import re
 import matplotlib.pyplot as plt
 import numpy as np
 
+titleFontSize = 20
+labelFontSize = 16
+textFontSize = 12
 def parseLog(logfile):
     '''
     output 
@@ -75,13 +78,23 @@ def drawBarsGroup2(parsedLog:dict, title="", xlabel="", ylabel=""):
                 label=m)
         
         for px , h in zip(x+(width * i), heights):
-            ax.text(px, h , f"{h:.3f}", ha='center', va='bottom')
+            ax.text(px, h , f"{h:.3f}", ha='center', va='bottom', fontsize=textFontSize)
 
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
-    ax.set_title(title)
+    ax.set_xlabel(xlabel, fontsize=labelFontSize)
+    ax.set_xlabel(xlabel, fontsize=labelFontSize)
+    ax.set_title(title, fontsize=titleFontSize)
     ax.set_xticks(x + width/2)
     ax.set_xticklabels([ str(bs) for bs in batchSizes] )
     ax.legend()
 
+    plt.show()
+
+def drawLineChart(infoDict:dict, title:str):
+    xs = infoDict.keys()
+    sortedXs = sorted(xs)
+    ys = [infoDict[x] for x in sortedXs]
+    plt.plot(sortedXs, ys, marker='o')
+    plt.title(title, fontsize=titleFontSize)
+    plt.xlabel("Batch Size", fontsize=labelFontSize)
+    plt.ylabel("Time", fontsize=labelFontSize)
     plt.show()

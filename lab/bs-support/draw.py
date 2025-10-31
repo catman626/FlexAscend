@@ -31,10 +31,15 @@ for i, method in enumerate(bsSupported):
             bsSupported[method], 
             width, 
             label=method)
+    
+    fails = [ xf for xf, yf in zip(x, bsSupported[method]) if yf == 0 ]
+    
+    label = "无法运行" if i == 0 else None
+    ax.scatter(fails, [30] * len(fails), marker='x', color='red', label=label)
 
-ax.set_xlabel('模型')
-ax.set_ylabel('支持的批大小')
-ax.set_title('最大支持的批大小图像')
+ax.set_xlabel('模型', fontsize=16)
+ax.set_ylabel('支持的批大小', fontsize=16)
+ax.set_title('最大支持的批大小', fontsize=20)
 ax.set_xticks(x + width/2)
 ax.set_xticklabels(modelNames)
 ax.legend()

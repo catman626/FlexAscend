@@ -3,9 +3,15 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import torch
 import re
+import sys
 
 plt.rcParams["font.family"] = "SimHei"
 # Sample data - replace this with your actual tensor values
+
+sys.path.append("..")   
+import labutils
+
+
 
 def draw2DGrapgh(data):
     '''
@@ -29,7 +35,7 @@ def draw2DGrapgh(data):
 
     # Add colorbar
     cbar = plt.colorbar(im)
-    cbar.set_label('权重最大值')
+    cbar.set_label('权重最大值', fontsize=labutils.labelFontSize)
 
     # Customize ticks and labels
     plt.xticks(np.arange(nLayers), np.arange(1, nLayers+1))
@@ -37,9 +43,9 @@ def draw2DGrapgh(data):
 
 
     # Add labels and title
-    plt.xlabel('层号')
-    plt.ylabel('模型组件')
-    plt.title('不同层的权重最大值分布图')
+    plt.xlabel('层号', fontsize=labutils.labelFontSize)
+    plt.ylabel('模型组件', fontsize=labutils.labelFontSize)
+    plt.title('不同层的权重最大值分布', fontsize=labutils.titleFontSize)
 
 
     plt.tight_layout()

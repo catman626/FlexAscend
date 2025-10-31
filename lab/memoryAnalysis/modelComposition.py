@@ -6,56 +6,66 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 
-# zhfont = matplotlib.font_manager.FontProperties(fname="SourceHanSansSC-Normal.otf") 
+from memoryComposition import percentLabelSize, titleSize
 
 plt.rcParams['font.family'] = 'SimHei'
 
-
 def makeAutoPercent(values):
-        def autoPercent(pct):
-                total = sum(values)
-                val = total * pct / 100
-                return f"{val:.2f} GB\n({pct:.1f}%)"
+    def autoPercent(pct):
+        total = sum(values)
+        val = total * pct / 100
+        return f"{val:.2f} GB\n({pct:.1f}%)"
 
-        return autoPercent
-# Data for the pie charts
-labels = ['注意力层', '前馈层', '其他']
-model1= [ 162.5669 , 218.2546 , 2.3190 ]
-model2= [ 27.7552 , 37.5170 , 1.3477 ]
-model3= [ 1.1408 , 1.5627 , 0.3845 ]
-# colors = ['#ff9999','#66b3ff','#99ff99','#ffcc99']
-colors = ['#ff9999','#66b3ff','#99ff99']
-explode = (0.05, 0.05, 0.05)  # Explode each slice a little
+    return autoPercent
 
-# Create a figure with 1 row and 3 columns
-fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
 
-# First pie chart
-ax1.pie(model1, explode=explode, colors=colors,
-        autopct=makeAutoPercent(model1), shadow=True, startangle=90)
-ax1.set_title('OPT-175b')
+def draw3Pies():
+    # Data for the pie charts
+    labels = ['注意力层', '前馈层', '其他']
+    model1= [ 162.5669 , 218.2546 , 2.3190 ]
+    model2= [ 27.7552 , 37.5170 , 1.3477 ]
+    model3= [ 1.1408 , 1.5627 , 0.3845 ]
+    # colors = ['#ff9999','#66b3ff','#99ff99','#ffcc99']
+    colors = ['#ff9999','#66b3ff','#99ff99']
+    explode = (0.05, 0.05, 0.05)  # Explode each slice a little
 
-# Second pie chart
-ax2.pie(model2, explode=explode, colors=colors,
-        autopct=makeAutoPercent(model2), shadow=True, startangle=90)
-ax2.set_title('OPT-30b')
+    # Create a figure with 1 row and 3 columns
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
 
-# Third pie chart
-ax3.pie(model3, explode=explode, colors=colors,
-        autopct=makeAutoPercent(model3), shadow=True, startangle=90)
-ax3.set_title('OPT-1.3b')
+    # First pie chart
+    ax1.pie(model1, explode=explode, colors=colors,
+            autopct=makeAutoPercent(model1), 
+            shadow=True, startangle=90, 
+            textprops={'fontsize': percentLabelSize})
+    ax1.set_title('OPT-175b', fontsize=titleSize)
 
-# Equal aspect ratio ensures that pie is drawn as a circle
-ax1.axis('equal')
-ax2.axis('equal')
-ax3.axis('equal')
+    # Second pie chart
+    ax2.pie(model2, explode=explode, colors=colors,
+            autopct=makeAutoPercent(model2), shadow=True, startangle=90,
+            textprops={'fontsize': percentLabelSize})
+    ax2.set_title('OPT-30b', fontsize=titleSize)
 
-# Adjust layout to prevent overlapping
-plt.tight_layout()
+    # Third pie chart
+    ax3.pie(model3, explode=explode, colors=colors,
+            autopct=makeAutoPercent(model3), shadow=True, startangle=90,
+            textprops={'fontsize': percentLabelSize})
+    ax3.set_title('OPT-1.3b', fontsize=titleSize)
 
-# plt.legend(labels, title="模型组件",  loc='upper right', prop=zhfont, title_fontproperties=zhfont)
-plt.legend(labels, title="模型组件",  loc='upper right')
+    # Equal aspect ratio ensures that pie is drawn as a circle
+    ax1.axis('equal')
+    ax2.axis('equal')
+    ax3.axis('equal')
 
-# Show the plot
-plt.show()
+    # Adjust layout to prevent overlapping
+    plt.tight_layout()
 
+    # plt.legend(labels, title="模型组件",  loc='upper right', prop=zhfont, title_fontproperties=zhfont)
+    plt.legend(labels, title="模型组件",  loc='upper right')
+
+    # Show the plot
+    plt.show()
+
+
+
+if __name__ == "__main__":
+    draw3Pies()

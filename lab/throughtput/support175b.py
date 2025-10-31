@@ -1,7 +1,11 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import re
+import sys
 
+
+sys.path.append("..")
+import labutils
 
 plt.rcParams['font.family'] = 'SimHei'
 floatPattern = r"[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?"
@@ -26,12 +30,12 @@ def drawThroughputVSBS(throughputs:dict):
         ax.bar([ str(bs) for bs in batchSizes],
             throughputList, width=width)
 
-        ax.text(i , throughputs[method], throughputs[method], ha='center', va='bottom') 
+        ax.text(i , throughputs[method], throughputs[method], ha='center', va='bottom', fontsize=14) 
             # ax.text(px, h , f"{h:.3f}", ha='center', va='bottom')
 
-    ax.set_xlabel('批大小')
-    ax.set_ylabel('吞吐量')
-    ax.set_title('OPT-175b大模型吞吐量')
+    ax.set_xlabel('批大小', fontsize=labutils.labelFontSize)
+    ax.set_ylabel('吞吐量', fontsize=labutils.labelFontSize)
+    ax.set_title('OPT-175b大模型吞吐量',fontsize=labutils.titleFontSize)
     # ax.legend()
 
     plt.show()
